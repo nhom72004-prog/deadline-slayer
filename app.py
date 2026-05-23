@@ -960,14 +960,16 @@ def render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list):
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-#  10. TAB 4: CHAT — CẢI TIẾN (bubble UI + gửi file lên Discord)
+#  10. TAB 4: CHAT — Tách riêng Gửi Web & Gửi Discord
 # ═══════════════════════════════════════════════════════════
 
 def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
     st.subheader("💬 Chat")
     sub_group, sub_dm = st.tabs(["🏢 Chat Nhóm", "🔒 Tin Nhắn Riêng (DM)"])
 
-    # ── CHAT NHÓM ─────────────────────────────────────────
+    # ══════════════════════════════════════════════════════
+    #  CHAT NHÓM
+    # ══════════════════════════════════════════════════════
     with sub_group:
         my_joined_groups = groups_df[groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False)]
         if my_joined_groups.empty:
@@ -975,83 +977,98 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
         else:
             group_options = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_joined_groups.iterrows()}
             selected_gid  = st.selectbox(
-                "Chọn nhóm để chat:",
+                "Chọn nhóm:",
                 options=list(group_options.keys()),
                 format_func=lambda x: group_options[x],
                 key="chat_grp_select"
             )
-            wh_grp = get_group_webhook(selected_gid, groups_df)
+            wh_grp      = get_group_webhook(selected_gid, groups_df)
+            sender_name = get_user_name(my_id, users_df)
+            group_label = group_options[selected_gid]
 
-            # Discord status badge
-            if wh_grp:
-                st.markdown('<span class="disc-badge disc-on">🟢 Discord Bot đang hoạt động — tin nhắn & file sẽ được gửi lên Discord</span>', unsafe_allow_html=True)
-            else:
-                st.markdown('<span class="disc-badge disc-off">⚫ Discord Bot chưa cấu hình — tin nhắn chỉ hiển thị trên web</span>', unsafe_allow_html=True)
-
-            st.markdown("---")
-
-            # Vùng tin nhắn (bubble)
-            chat_container = st.container(height=400)
+            # ── Vùng hiển thị tin nhắn web ────────────────
+            chat_container = st.container(height=380)
             with chat_container:
                 group_chats = chat_df[chat_df["Group_Nhận_ID"] == selected_gid] if not chat_df.empty else pd.DataFrame(columns=CHAT_COLS)
                 if group_chats.empty:
-                    st.markdown('<div class="chat-empty"><div class="chat-empty-icon">💬</div>Chưa có tin nhắn nào... Hãy là người đầu tiên phá băng nhé!</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="chat-empty"><div class="chat-empty-icon">💬</div>Chưa có tin nhắn nào trên web... Hãy là người đầu tiên phá băng nhé!</div>', unsafe_allow_html=True)
                 else:
                     st.markdown(render_messages_html(group_chats.iterrows(), my_id, users_df, "group"), unsafe_allow_html=True)
 
-            # Form gửi — tin nhắn + file cùng 1 lúc
-            with st.form("chat_grp_form", clear_on_submit=True):
-                col_msg, col_btn = st.columns([5, 1])
-                with col_msg:
-                    msg_grp = st.text_input(
-                        "msg", label_visibility="collapsed",
-                        placeholder="Nhắn gì đó vào nhóm...",
-                        key="grp_msg_input"
+            st.markdown("---")
+
+            # ── Khu vực 2 cột: WEB | DISCORD ─────────────
+            col_web, col_disc = st.columns(2, gap="medium")
+
+            # ── [CỘT TRÁI] GỬI LÊN WEB ───────────────────
+            with col_web:
+                st.markdown("#### 🌐 Gửi lên Web")
+                st.caption("Tin nhắn sẽ lưu vào chat nhóm trên web, không gửi Discord.")
+                with st.form("chat_grp_web_form", clear_on_submit=True):
+                    msg_web = st.text_area(
+                        "Nội dung tin nhắn:",
+                        placeholder="Nhắn gì đó cho cả nhóm...",
+                        height=100,
+                        key="grp_web_msg"
                     )
-                with col_btn:
-                    send_grp = st.form_submit_button("📨 Gửi", use_container_width=True)
-
-                upload_grp = st.file_uploader(
-                    "📎 Đính kèm file (tự động gửi lên Discord nhóm nếu Bot đang ON)",
-                    help="File sẽ được đồng thời lưu vào chat web và gửi thẳng lên Discord. Hỗ trợ tối đa 25MB.",
-                    key="grp_file_input"
-                )
-
-                if send_grp:
-                    if not msg_grp.strip() and not upload_grp:
-                        st.warning("💭 Nhắn gì đi chứ! Hoặc đính kèm file cũng được~")
-                    else:
-                        sender_name = get_user_name(my_id, users_df)
-                        group_label = group_options[selected_gid]
-
-                        # Ghi vào Sheets
-                        sheet_msg = msg_grp.strip()
-                        if upload_grp:
-                            sheet_msg += f" [📎 {upload_grp.name}]"
-                        if sheet_msg:
+                    send_web = st.form_submit_button("📩 Gửi lên Web", use_container_width=True)
+                    if send_web:
+                        if not msg_web.strip():
+                            st.warning("💭 Nhắn gì đi chứ, để trống là không gửi được đâu~")
+                        else:
                             append_row_data(WS_CHAT, [
                                 NOW().strftime("%Y-%m-%d %H:%M:%S"),
-                                my_id, selected_gid, sheet_msg
+                                my_id, selected_gid, msg_web.strip()
                             ])
+                            st.toast("✅ Tin nhắn đã được lưu lên web!")
+                            st.rerun()
 
-                        # Gửi lên Discord (cả tin nhắn lẫn file)
-                        if wh_grp:
-                            if msg_grp.strip():
-                                d_msg = discord_group_chat(sender_name, group_label, msg_grp.strip())
+            # ── [CỘT PHẢI] GỬI LÊN DISCORD ───────────────
+            with col_disc:
+                st.markdown("#### 🎮 Gửi lên Discord")
+                if wh_grp:
+                    st.markdown('<span class="disc-badge disc-on">🟢 Discord Bot đang hoạt động</span>', unsafe_allow_html=True)
+                else:
+                    st.markdown('<span class="disc-badge disc-off">⚫ Bot chưa cấu hình — nhờ trưởng nhóm thêm Webhook</span>', unsafe_allow_html=True)
+
+                with st.form("chat_grp_disc_form", clear_on_submit=True):
+                    msg_disc   = st.text_area(
+                        "Nội dung tin nhắn Discord:",
+                        placeholder="Tin nhắn này sẽ bay thẳng lên Discord, không lưu web...",
+                        height=68,
+                        key="grp_disc_msg"
+                    )
+                    upload_disc = st.file_uploader(
+                        "📎 Đính kèm file (tuỳ chọn, tối đa 25MB)",
+                        key="grp_disc_file"
+                    )
+                    send_disc = st.form_submit_button(
+                        "🚀 Gửi lên Discord",
+                        use_container_width=True,
+                        disabled=not wh_grp
+                    )
+                    if send_disc:
+                        if not msg_disc.strip() and not upload_disc:
+                            st.warning("💭 Nhắn gì hoặc đính file đi rồi mới gửi được~")
+                        elif not wh_grp:
+                            st.error("❌ Nhóm chưa có Discord Webhook! Nhờ trưởng nhóm cài nhé~")
+                        else:
+                            d_msg = discord_group_chat(sender_name, group_label, msg_disc.strip()) if msg_disc.strip() \
+                                    else f"📎 **{sender_name}** vừa gửi file vào nhóm **{group_label}**!"
+                            if upload_disc:
+                                ok = push_to_discord(d_msg, webhook_url=wh_grp,
+                                                     file_bytes=upload_disc.getvalue(),
+                                                     filename=upload_disc.name)
                             else:
-                                d_msg = f"📎 **{sender_name}** vừa thả file vào nhóm **{group_label}**!"
-
-                            if upload_grp:
-                                # Gửi file kèm nội dung lên Discord
-                                push_to_discord(d_msg, webhook_url=wh_grp,
-                                                file_bytes=upload_grp.getvalue(),
-                                                filename=upload_grp.name)
+                                ok = push_to_discord(d_msg, webhook_url=wh_grp)
+                            if ok:
+                                st.toast("🚀 Đã bắn lên Discord thành công!")
                             else:
-                                push_to_discord(d_msg, webhook_url=wh_grp)
+                                st.error("😥 Gửi thất bại! Kiểm tra lại Discord Webhook nhé~")
 
-                        st.rerun()
-
-    # ── TIN NHẮN RIÊNG (DM) ───────────────────────────────
+    # ══════════════════════════════════════════════════════
+    #  TIN NHẮN RIÊNG (DM)
+    # ══════════════════════════════════════════════════════
     with sub_dm:
         if not my_friends_list:
             st.warning("👀 Chưa có bạn bè nào để nhắn tin riêng! Kết bạn thêm đi rồi DM nhau nào~")
@@ -1065,16 +1082,10 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
             )
             receiver_wh = get_user_dm_webhook(selected_friend, users_df)
             friend_name = get_user_name(selected_friend, users_df)
+            sender_name = get_user_name(my_id, users_df)
 
-            if receiver_wh:
-                st.markdown(f'<span class="disc-badge disc-on">🟢 {friend_name} sẽ nhận ping Discord khi bạn gửi tin hoặc file</span>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<span class="disc-badge disc-off">⚫ {friend_name} chưa cài Webhook — tin & file chỉ hiển thị trên web</span>', unsafe_allow_html=True)
-
-            st.markdown("---")
-
-            # Vùng DM (bubble)
-            dm_container = st.container(height=400)
+            # ── Vùng hiển thị DM ──────────────────────────
+            dm_container = st.container(height=380)
             with dm_container:
                 convo = dm_df[
                     ((dm_df["Người_Gửi_ID"] == my_id)          & (dm_df["Người_Nhận_ID"] == selected_friend)) |
@@ -1086,55 +1097,76 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
                 else:
                     st.markdown(render_messages_html(convo.iterrows(), my_id, users_df, "dm"), unsafe_allow_html=True)
 
-            # Form gửi DM — tin nhắn + file
-            with st.form("chat_dm_form", clear_on_submit=True):
-                col_msg, col_btn = st.columns([5, 1])
-                with col_msg:
-                    msg_dm = st.text_input(
-                        "dm", label_visibility="collapsed",
+            st.markdown("---")
+
+            # ── Khu vực 2 cột: WEB | DISCORD ─────────────
+            col_web_dm, col_disc_dm = st.columns(2, gap="medium")
+
+            # ── [CỘT TRÁI] GỬI LÊN WEB ───────────────────
+            with col_web_dm:
+                st.markdown("#### 🌐 Gửi lên Web")
+                st.caption(f"Tin nhắn sẽ lưu vào cuộc trò chuyện với {friend_name} trên web.")
+                with st.form("dm_web_form", clear_on_submit=True):
+                    msg_dm_web = st.text_area(
+                        "Nội dung:",
                         placeholder=f"Nhắn riêng cho {friend_name}...",
-                        key="dm_msg_input"
+                        height=100,
+                        key="dm_web_msg"
                     )
-                with col_btn:
-                    send_dm = st.form_submit_button("🔒 Gửi", use_container_width=True)
-
-                upload_dm = st.file_uploader(
-                    "📎 Đính kèm file (tự động gửi qua Discord cá nhân người nhận nếu họ đã cài Webhook)",
-                    help="File sẽ được gửi thẳng đến Webhook Discord cá nhân của người nhận.",
-                    key="dm_file_input"
-                )
-
-                if send_dm:
-                    if not msg_dm.strip() and not upload_dm:
-                        st.warning("💭 Nhắn gì đi! Gửi trống thì người ta không hiểu gì hết~")
-                    else:
-                        sender_name = get_user_name(my_id, users_df)
-
-                        # Ghi vào Sheets
-                        sheet_msg = msg_dm.strip()
-                        if upload_dm:
-                            sheet_msg += f" [📎 {upload_dm.name}]"
-                        if sheet_msg:
+                    send_dm_web = st.form_submit_button("📩 Gửi lên Web", use_container_width=True)
+                    if send_dm_web:
+                        if not msg_dm_web.strip():
+                            st.warning("💭 Nhắn gì đi rồi mới gửi được chứ~")
+                        else:
                             append_row_data(WS_DM, [
                                 NOW().strftime("%Y-%m-%d %H:%M:%S"),
-                                my_id, selected_friend, sheet_msg
+                                my_id, selected_friend, msg_dm_web.strip()
                             ])
+                            st.toast("✅ Tin nhắn đã lưu lên web!")
+                            st.rerun()
 
-                        # Gửi lên Discord cá nhân người nhận (cả tin + file)
-                        if receiver_wh:
-                            if msg_dm.strip():
-                                d_msg = discord_dm(sender_name, msg_dm.strip())
+            # ── [CỘT PHẢI] GỬI LÊN DISCORD ───────────────
+            with col_disc_dm:
+                st.markdown("#### 🎮 Gửi lên Discord")
+                if receiver_wh:
+                    st.markdown(f'<span class="disc-badge disc-on">🟢 {friend_name} sẽ nhận ping Discord</span>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<span class="disc-badge disc-off">⚫ {friend_name} chưa cài Webhook cá nhân</span>', unsafe_allow_html=True)
+
+                with st.form("dm_disc_form", clear_on_submit=True):
+                    msg_dm_disc = st.text_area(
+                        "Nội dung Discord:",
+                        placeholder="Tin nhắn này chỉ gửi thẳng lên Discord, không lưu web...",
+                        height=68,
+                        key="dm_disc_msg"
+                    )
+                    upload_dm_disc = st.file_uploader(
+                        "📎 Đính kèm file (tuỳ chọn, tối đa 25MB)",
+                        key="dm_disc_file"
+                    )
+                    send_dm_disc = st.form_submit_button(
+                        "🚀 Gửi lên Discord",
+                        use_container_width=True,
+                        disabled=not receiver_wh
+                    )
+                    if send_dm_disc:
+                        if not msg_dm_disc.strip() and not upload_dm_disc:
+                            st.warning("💭 Nhắn gì hoặc đính file đi rồi mới gửi được~")
+                        elif not receiver_wh:
+                            st.error(f"❌ {friend_name} chưa cài Discord Webhook cá nhân!")
+                        else:
+                            d_msg = discord_dm(sender_name, msg_dm_disc.strip()) if msg_dm_disc.strip() \
+                                    else f"📎 **{sender_name}** vừa gửi cho bạn một file đặc biệt~ Check ngay nhé!"
+                            if upload_dm_disc:
+                                ok = push_to_discord(d_msg, webhook_url=receiver_wh,
+                                                     file_bytes=upload_dm_disc.getvalue(),
+                                                     filename=upload_dm_disc.name)
                             else:
-                                d_msg = f"📎 **{sender_name}** vừa gửi cho bạn một file đặc biệt~ Check ngay nhé!"
-
-                            if upload_dm:
-                                push_to_discord(d_msg, webhook_url=receiver_wh,
-                                                file_bytes=upload_dm.getvalue(),
-                                                filename=upload_dm.name)
+                                ok = push_to_discord(d_msg, webhook_url=receiver_wh)
+                            if ok:
+                                st.toast(f"🚀 Đã ping Discord của {friend_name} thành công!")
                             else:
-                                push_to_discord(d_msg, webhook_url=receiver_wh)
-
-                        st.rerun()
+                                st.error("😥 Gửi thất bại! Kiểm tra lại Webhook của người nhận nhé~")
 
 # ═══════════════════════════════════════════════════════════
 #  11. TAB 5: LEADERBOARD
