@@ -705,3 +705,6 @@ def main_app(data):
     current_user = st.session_state['current_user']
     my_id        = current_user["User_ID"]
     is_leader    = not groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id].empty
+    else:
+        main_app(data)
+ 
