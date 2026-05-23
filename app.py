@@ -7,6 +7,30 @@ import plotly.express as px
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from zoneinfo import ZoneInfo
+import json
+import os
+
+# --- ĐOẠN CODE BẠN BỊ THIẾU ĐỂ TẠO CHÌA KHÓA TRÊN CLOUD ---
+if not os.path.exists("credentials.json"):
+    if "gcp_service_account" in st.secrets:
+        with open("credentials.json", "w") as f:
+            json.dump(dict(st.secrets["gcp_service_account"]), f)
+# -----------------------------------------------------------
+
+# ─── TIMEZONE CONFIG ────────────────────────────────────────
+TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+def NOW():
+    return datetime.now(TZ)
+
+import streamlit as st
+from datetime import datetime, timedelta
+import random
+import pandas as pd
+import requests
+import plotly.express as px
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from zoneinfo import ZoneInfo
 
 # ─── TIMEZONE CONFIG ────────────────────────────────────────
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
