@@ -553,11 +553,14 @@ def render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list):
         if my_groups.empty: st.warning("Bạn chưa làm trưởng nhóm của nhóm nào.")
         else:
             grp_opts = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_groups.iterrows()}
-            sel_grp = st.selectbox("Chọn nhóm", list(grp_opts.keys()), format_func=lambda x: grp_opts[x])
+            # THÊM KEY VÀO ĐÂY:
+            sel_grp = st.selectbox("Chọn nhóm", list(grp_opts.keys()), format_func=lambda x: grp_opts[x], key="assign_sel_grp")
             mems = [m.strip() for m in str(groups_df[groups_df["Group_ID"] == sel_grp].iloc[0]["Thành_Viên_IDs"]).split(",") if m.strip()]
-            target_id = st.selectbox("Chọn thành viên", mems, format_func=lambda x: get_user_name(x, users_df))
+            # THÊM KEY VÀO ĐÂY:
+            target_id = st.selectbox("Chọn thành viên", mems, format_func=lambda x: get_user_name(x, users_df), key="assign_sel_member")
     else:
-        target_id = st.selectbox("Chọn bạn bè", my_friends_list, format_func=lambda x: get_user_name(x, users_df))
+        # THÊM KEY VÀO ĐÂY:
+        target_id = st.selectbox("Chọn bạn bè", my_friends_list, format_func=lambda x: get_user_name(x, users_df), key="assign_sel_friend")
 
     task_name = st.text_input("Tên công việc")
     deadline = st.date_input("Hạn chót (Ngày)")
@@ -593,7 +596,8 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
             return
         
         grp_opts = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_groups.iterrows()}
-        sel_grp = st.selectbox("Chọn nhóm", list(grp_opts.keys()), format_func=lambda x: grp_opts[x])
+        # THÊM KEY VÀO ĐÂY (Sửa lỗi trùng lặp):
+        sel_grp = st.selectbox("Chọn nhóm", list(grp_opts.keys()), format_func=lambda x: grp_opts[x], key="chat_sel_grp")
         
         # Filter and render
         messages = chat_df[chat_df["Group_Nhận_ID"] == sel_grp].sort_values("Thời_Gian")
@@ -617,7 +621,8 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
         if not my_friends_list:
             st.info("Chưa có bạn bè để nhắn tin!")
             return
-        sel_friend = st.selectbox("Chọn bạn bè", my_friends_list, format_func=lambda x: get_user_name(x, users_df))
+        # THÊM KEY VÀO ĐÂY:
+        sel_friend = st.selectbox("Chọn bạn bè", my_friends_list, format_func=lambda x: get_user_name(x, users_df), key="chat_sel_friend")
         
         messages = dm_df[
             ((dm_df["Người_Gửi_ID"] == my_id) & (dm_df["Người_Nhận_ID"] == sel_friend)) |
@@ -700,48 +705,3 @@ def main_app(data):
     current_user = st.session_state['current_user']
     my_id        = current_user["User_ID"]
     is_leader    = not groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id].empty
-
-    with st.sidebar:
-        st.markdown("## ⚔️ DEADLINE SLAYER")
-        st.markdown("---")
-        st.success(f"👤 **{current_user['Tên']}**\n\n🆔 ID: `{my_id}`")
-        if st.button("🚪 Đăng xuất", use_container_width=True):
-            st.session_state['logged_in']    = False
-            st.session_state['current_user'] = None
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### 🔔 Discord Webhook Cá Nhân")
-        my_row    = users_df[users_df["User_ID"] == my_id]
-        cur_wh_dm = str(my_row.iloc[0].get("Discord_Webhook_DM", "")).strip() if not my_row.empty else ""
-        new_wh_dm = st.text_input("Webhook nhận DM của bạn:", value=cur_wh_dm, placeholder="https://discord.com/api/...", key="sidebar_wh_dm").strip()
-        if st.button("💾 Lưu Webhook DM", use_container_width=True):
-            update_cell_by_id(WS_USERS, "User_ID", my_id, "Discord_Webhook_DM", new_wh_dm, USER_COLS)
-            st.toast(msg_webhook_saved())
-
-    t1, t2, t3, t4, t5, t6 = st.tabs([
-        "📊 Dashboard Công Việc",
-        "👥 Kết Bạn & Tạo Nhóm",
-        "📋 Giao Việc Mới",
-        "💬 Chat",
-        "🏆 Xếp Hạng",
-        "👥 Quản Lý Bạn Bè", 
-    ])
-
-    me_in_db        = users_df[users_df["User_ID"] == my_id].iloc[0]
-    my_friends_list = [f.strip() for f in str(me_in_db["Bạn_Bè"]).split(",") if f.strip()]
-
-    with t1: render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader)
-    with t2: render_network(users_df, groups_df, my_id, my_friends_list)
-    with t3: render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list)
-    with t4: render_chat(data["chat"], data["dm"], groups_df, users_df, my_id, my_friends_list)
-    with t5: render_leaderboard(tasks_df, users_df)
-    with t6: render_friend_management(users_df, my_id, my_friends_list)
-
-# ENTRY POINT
-if __name__ == "__main__":
-    app_data = fetch_all_data()
-    if not st.session_state['logged_in']:
-        show_auth_page(app_data)
-    else:
-        main_app(app_data)
