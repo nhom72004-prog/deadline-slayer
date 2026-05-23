@@ -7,6 +7,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from zoneinfo import ZoneInfo
 import json
 import os
+import random
 
 # --- TẠO CHÌA KHÓA TRÊN CLOUD TỪ SECRETS ---
 if not os.path.exists("credentials.json"):
@@ -29,7 +30,6 @@ st.set_page_config(
 
 if "sheet_name" not in st.session_state:
     st.session_state["sheet_name"] = "DeadlineSlayer_DB"
-
 if 'logged_in' not in st.session_state:
     st.session_state['logged_in'] = False
 if 'current_user' not in st.session_state:
@@ -80,7 +80,7 @@ WS_USERS  = "Users"
 WS_GROUPS = "Groups"
 WS_PROOFS = "Proofs"
 WS_CHAT   = "ChatRoom"
-WS_DM     = "DirectMessages"   # ← SHEET MỚI cho tin nhắn cá nhân
+WS_DM     = "DirectMessages"
 
 TASK_COLS  = ["ID", "Tên_Công_Việc", "Môn_Học", "Người_Phụ_Trách_ID", "Deadline",
               "Độ_Ưu_Tiên", "Trạng_Thái", "Tiến_Độ_%", "Giai_Đoạn_Hiện_Tại",
@@ -89,10 +89,206 @@ USER_COLS  = ["User_ID", "Password", "Tên", "Email", "Bạn_Bè", "Discord_Webh
 GROUP_COLS = ["Group_ID", "Tên_Nhóm", "Trưởng_Nhóm_ID", "Thành_Viên_IDs", "Discord_Webhook", "Ngày_Tạo"]
 PROOF_COLS = ["Task_ID", "Người_Nộp_ID", "Thời_Gian", "Mô_Tả", "Giai_Đoạn", "URL_File"]
 CHAT_COLS  = ["Thời_Gian", "Người_Gửi_ID", "Group_Nhận_ID", "Nội_Dung"]
-DM_COLS    = ["Thời_Gian", "Người_Gửi_ID", "Người_Nhận_ID", "Nội_Dung"]  # ← Schema DM
+DM_COLS    = ["Thời_Gian", "Người_Gửi_ID", "Người_Nhận_ID", "Nội_Dung"]
 
 # ═══════════════════════════════════════════════════════════
-#  2. GOOGLE SHEETS CORE FUNCTIONS
+#  2. LỜI NHẮN VUI VẺ — RANDOM THEO TỪNG LOẠI SỰ KIỆN
+# ═══════════════════════════════════════════════════════════
+
+def msg_login_success(name):
+    options = [
+        f"⚔️ Chào chiến binh **{name}**! Deadline đang run rẩy trước sự hiện diện của bạn!",
+        f"🔥 YO **{name}**! Sẵn sàng nghiền nát deadline chưa? Let's GOOO!",
+        f"🛡️ **{name}** đã vào trận! Hôm nay chúng ta chinh phục deadline nào?",
+        f"🎮 Player **{name}** đã online! Cả team đang chờ bạn flex não đây~",
+        f"✨ Ơ kìa **{name}** đã xuất hiện rồi! Deadline thấy bạn là đã sợ rồi đó!",
+    ]
+    return random.choice(options)
+
+def msg_login_fail():
+    options = [
+        "🤔 Hmm... ID hay mật khẩu có vẻ sai sai? Thử lại xem sao!",
+        "🙈 Ồ ồ, thông tin không khớp rồi! Hay là bạn đang nhập pass của acc game? 😂",
+        "❌ Không tìm thấy tài khoản này! Kiểm tra lại ID và mật khẩu nhé bro~",
+        "🔐 Cửa không mở! Sai chìa khóa rồi, thử lại nhé!",
+    ]
+    return random.choice(options)
+
+def msg_register_success(new_id):
+    options = [
+        f"🎉 WELCOME TO THE SQUAD! ID của bạn là **`{new_id}`** — nhớ kỹ nhé, mất là khóc đó!",
+        f"🚀 Tài khoản **`{new_id}`** đã được khai sinh! Chiến binh mới đã gia nhập chiến trường!",
+        f"🎊 Yayyy! **`{new_id}`** chào đời rồi! Đây là ID của bạn, đừng để mất nha~",
+        f"🦾 Đăng ký thành công! ID **`{new_id}`** — lưu lại ngay đi, deadline không chờ đâu!",
+    ]
+    return random.choice(options)
+
+def msg_task_assigned(task_name, assignee_name):
+    options = [
+        f"🚀 Lệnh đã ban! **{assignee_name}** vừa nhận nhiệm vụ **{task_name}** — cố lên nào!",
+        f"📋 Xong xuôi! **{task_name}** đã được giao cho **{assignee_name}** rồi. Go go go!",
+        f"⚡ Giao việc thành công! **{assignee_name}** ơi, **{task_name}** đang chờ bạn kìa~",
+        f"🎯 Đã bắn lệnh! **{task_name}** → **{assignee_name}**. Chúc may mắn nhé!",
+    ]
+    return random.choice(options)
+
+def msg_progress_saved(percent):
+    if percent == 100:
+        opts = [
+            "🏆 BOOOM! 100%! Bạn vừa hạ gục deadline! Tuyệt vời quá điiiii!",
+            "🎉 100% rồi! Chill thôi bro, task này chính thức về tay bạn rồi!",
+            "✅ Xong sạch! Task đã được khắc tên vào bảng vàng chiến thắng!",
+        ]
+    elif percent >= 75:
+        opts = [
+            f"💪 {percent}%! Sắp về đích rồi! Một chút nữa thôi, đừng bỏ cuộc!",
+            f"🔥 {percent}%! Gần xong rồi bro ơi! Cố thêm chút xíu nữa!",
+            f"⚡ {percent}%! Đang bay nhanh lắm! Deadline chạy không kịp bạn đâu!",
+        ]
+    elif percent >= 50:
+        opts = [
+            f"🌗 {percent}%! Nửa đường rồi! Tiếp tục nào, không dừng ở đây!",
+            f"💡 {percent}%! Đang đà tốt đấy! Keep the momentum!",
+            f"🎮 {percent}%! Checkpoint đã lưu! Tiến về phía trước nào!",
+        ]
+    else:
+        opts = [
+            f"🌱 {percent}%! Bước đầu tiên luôn khó nhất — bạn đã bắt đầu rồi, tuyệt!",
+            f"🚀 {percent}%! Đã lưu! Mỗi % đều là chiến thắng nhỏ nhé!",
+            f"✏️ {percent}%! Oke! Hành trình vạn dặm bắt đầu từ đây!",
+        ]
+    return random.choice(opts)
+
+def msg_friend_added(name):
+    options = [
+        f"🤝 **{name}** đã vào danh sách bạn bè! Cùng nhau chinh phục deadline nào~",
+        f"👯 YAY! **{name}** và bạn giờ là đồng đội rồi! Welcome to the squad!",
+        f"🎉 Kết bạn thành công với **{name}**! Cả team strong hơn rồi!",
+        f"💫 **{name}** đã được thêm vào list bạn bè! Tương lai sẽ cùng nhau cày deadline!",
+    ]
+    return random.choice(options)
+
+def msg_group_created(grp_name):
+    options = [
+        f"🏰 Nhóm **{grp_name}** đã được thành lập! Trưởng nhóm ơi, dẫn dắt team đến vinh quang nhé!",
+        f"🎊 **{grp_name}** chính thức ra đời! Cùng nhau phá đảo môn học nào!",
+        f"⚔️ Biệt đội **{grp_name}** đã tập hợp! Ready to slay some deadlines?!",
+        f"🚀 LAUNCH! Nhóm **{grp_name}** đã cất cánh! Không deadline nào có thể cản bước!",
+    ]
+    return random.choice(options)
+
+def msg_group_updated():
+    options = [
+        "💾 Nhóm đã được nâng cấp! Thay đổi đã lưu thành công rồi~",
+        "✅ Xong! Thông tin nhóm đã được cập nhật. Fresh start nào!",
+        "🔧 Đã tune nhóm xong! Giờ ngon hơn rồi đó!",
+    ]
+    return random.choice(options)
+
+def msg_group_deleted():
+    options = [
+        "💥 Nhóm đã giải tán! Mỗi hành trình đều có hồi kết. Hẹn gặp lại ở chiến tuyến mới!",
+        "👋 Nhóm đã bị xóa thành công! Chia tay nhé, hope to work together again!",
+        "🌅 Nhóm đã kết thúc sứ mệnh! Đã xóa sạch rồi~",
+    ]
+    return random.choice(options)
+
+def msg_proof_sent():
+    options = [
+        "📤 Bằng chứng đã bay lên Discord! Trưởng nhóm đã nhận được rồi đó~",
+        "🚀 File minh chứng đã được phóng lên Discord thành công! Chill thôi!",
+        "✅ Đã nộp! Minh chứng đã chạm đến Discord nhóm. Bạn đã hoàn thành bổn phận!",
+        "🎯 Đã đẩy file lên Discord rồi! Xong việc, ngồi thở cái nào~",
+    ]
+    return random.choice(options)
+
+def msg_chat_sent_group():
+    options = [
+        "💬 Tin nhắn đã gửi! Cả nhóm đang đọc rồi đó~",
+        "📨 Bay đến nhóm rồi! Chờ mọi người reply nhé!",
+        "⚡ Sent! Tin nhắn đã đến tay cả team!",
+    ]
+    return random.choice(options)
+
+def msg_dm_sent():
+    options = [
+        "🔒 Tin nhắn bí mật đã được gửi đi! Chỉ có 2 người biết thôi nhé~",
+        "📩 DM thành công! Hy vọng họ reply nhanh cho bạn!",
+        "💌 Tin nhắn riêng đã bay đến nơi! Bạn thật tâm lý~",
+        "🤫 Psst! Tin nhắn đã đến tay người nhận rồi!",
+    ]
+    return random.choice(options)
+
+def msg_webhook_saved():
+    options = [
+        "🤖 Discord Webhook đã được kết nối! Bot của bạn đã sẵn sàng chiến đấu!",
+        "🔔 Webhook lưu xong! Từ giờ Discord của bạn sẽ sôi động hơn nhiều~",
+        "✅ Đã lưu Webhook! Mọi thông báo sẽ bay thẳng vào Discord rồi!",
+    ]
+    return random.choice(options)
+
+def msg_account_deleted(uid):
+    options = [
+        f"💨 Tài khoản `{uid}` đã bay màu! Bye bye~",
+        f"🗑️ `{uid}` đã được xóa sạch! Gone like the wind!",
+        f"✂️ Tài khoản `{uid}` đã chính thức nghỉ hưu. Đã xóa thành công!",
+    ]
+    return random.choice(options)
+
+def msg_discord_broadcast(leader_name):
+    options = [
+        f"📢 **[THÔNG BÁO ĐỎ TỪ TRƯỞNG NHÓM {leader_name.upper()}]** 🔴\n",
+        f"🚨 **[{leader_name.upper()} CÓ LỆNH MỚI]** 📣\n",
+        f"⚡ **[TIN NÓNG TỪ SẾP {leader_name.upper()}]** 👇\n",
+        f"📡 **[PHÁT SÓNG KHẨN TỪ {leader_name.upper()}]** 🎙️\n",
+    ]
+    return random.choice(options)
+
+# Discord messages
+def discord_task_assigned(task_name, assignee_name, deadline, priority):
+    emojis = ["🚨", "⚡", "🔥", "💥", "🎯"]
+    e = random.choice(emojis)
+    prio_map = {"Cao": "🔴 KHẨN CẤP", "Trung bình": "🟡 Bình thường", "Thấp": "🟢 Thư thả"}
+    prio_label = prio_map.get(priority, priority)
+    return (
+        f"{e} **NHIỆM VỤ MỚI XUẤT HIỆN!** {e}\n"
+        f"📌 **{task_name}**\n"
+        f"👤 Chiến binh được chọn: **{assignee_name}**\n"
+        f"⏰ Hạn chót: `{deadline}`\n"
+        f"🏷️ Độ ưu tiên: {prio_label}\n"
+        f"💪 *Cố lên nào! Cả team tin bạn!*"
+    )
+
+def discord_group_created(grp_name):
+    return (
+        f"🎊 **BIỆT ĐỘI MỚI ĐÃ THÀNH LẬP!**\n"
+        f"🏰 Nhóm **{grp_name}** chính thức ra đời!\n"
+        f"⚔️ *Không có deadline nào là không thể chinh phục!*\n"
+        f"🚀 Let's GOOOOO!!!"
+    )
+
+def discord_proof_sent(assignee_name, task_name):
+    emojis = ["✅", "🎯", "💪", "🏆", "🔥"]
+    e = random.choice(emojis)
+    return (
+        f"{e} **MINH CHỨNG ĐÃ NỘP!**\n"
+        f"👤 **{assignee_name}** vừa nộp bằng chứng cho:\n"
+        f"📋 Task: **{task_name}**\n"
+        f"👆 *Check file ở trên nhé trưởng nhóm ơi~*"
+    )
+
+def discord_dm(sender_name, content):
+    return (
+        f"📩 **Tin nhắn riêng từ {sender_name}:**\n"
+        f"{content}\n"
+        f"*(Trả lời trên Deadline Slayer nhé!)*"
+    )
+
+def discord_group_chat(sender_name, group_label, content):
+    return f"💬 **{sender_name}** › [{group_label}]:\n{content}"
+
+# ═══════════════════════════════════════════════════════════
+#  3. GOOGLE SHEETS CORE FUNCTIONS
 # ═══════════════════════════════════════════════════════════
 
 @st.cache_resource(ttl=15)
@@ -118,7 +314,7 @@ def init_spreadsheet_structure(ss):
             ws = ss.add_worksheet(title=name, rows=1000, cols=len(cols))
             ws.append_row(cols)
 
-@st.cache_data(ttl=3)
+@st.cache_data(ttl=1)
 def fetch_all_data():
     client = get_sheets_client()
     empty_dict = {
@@ -166,9 +362,11 @@ def get_worksheet_target(name: str):
         return None
 
 def append_row_data(name: str, row: list):
+    import time
     ws = get_worksheet_target(name)
     if ws:
         ws.append_row(row, value_input_option="USER_ENTERED")
+        time.sleep(0.5)
         fetch_all_data.clear()
 
 def update_cell_by_id(ws_name, id_col_name, item_id, update_col_name, new_val, schema_cols):
@@ -183,7 +381,7 @@ def update_cell_by_id(ws_name, id_col_name, item_id, update_col_name, new_val, s
             ws.update_cell(cell.row, update_col_idx, new_val)
             fetch_all_data.clear()
     except Exception as e:
-        st.error(f"Lỗi đồng bộ: {e}")
+        st.error(f"💀 Ôi thôi, lỗi đồng bộ rồi: {e}")
 
 def delete_row_by_id(ws_name, id_col_name, item_id, schema_cols):
     ws = get_worksheet_target(ws_name)
@@ -198,11 +396,11 @@ def delete_row_by_id(ws_name, id_col_name, item_id, schema_cols):
             return True
         return False
     except Exception as e:
-        st.error(f"Lỗi xóa: {e}")
+        st.error(f"💀 Xóa thất bại rồi bro: {e}")
         return False
 
 # ═══════════════════════════════════════════════════════════
-#  3. DISCORD & HELPERS
+#  4. DISCORD & HELPERS
 # ═══════════════════════════════════════════════════════════
 
 def push_to_discord(message: str, webhook_url: str = "", file_bytes=None, filename: str = None) -> bool:
@@ -210,14 +408,13 @@ def push_to_discord(message: str, webhook_url: str = "", file_bytes=None, filena
         return False
     try:
         if file_bytes and filename:
-            data = {"content": message}
-            files = {"file": (filename, file_bytes)}
-            resp = requests.post(webhook_url, data=data, files=files, timeout=15)
+            resp = requests.post(webhook_url, data={"content": message},
+                                 files={"file": (filename, file_bytes)}, timeout=15)
         else:
             resp = requests.post(webhook_url, json={"content": message}, timeout=5)
         return resp.status_code in (200, 204)
     except Exception as e:
-        st.warning(f"Lỗi khi gửi Discord: {str(e)}")
+        st.warning(f"🤖 Bot gặp sự cố khi gửi Discord: {str(e)}")
         return False
 
 def get_group_webhook(group_id: str, groups_df: pd.DataFrame) -> str:
@@ -227,7 +424,6 @@ def get_group_webhook(group_id: str, groups_df: pd.DataFrame) -> str:
     return str(match.iloc[0].get("Discord_Webhook", "")).strip()
 
 def get_user_dm_webhook(user_id: str, users_df: pd.DataFrame) -> str:
-    """Lấy Discord Webhook DM cá nhân của một user."""
     match = users_df[users_df["User_ID"] == user_id]
     if match.empty:
         return ""
@@ -263,26 +459,28 @@ def calculate_task_status(row: pd.Series) -> str:
 
 def format_time_remaining(row: pd.Series) -> str:
     if str(row.get("Trạng_Thái", "")) == "Đã xong":
-        return "Hoàn thành 🎉"
+        return "Xong sạch rồi 🎉"
     dl = parse_deadline_timezone(row.get("Deadline", ""))
     if dl is None:
         return "—"
     total_seconds = int((dl - NOW()).total_seconds())
     if total_seconds < 0:
-        return "Chạy ngay đi 🛑"
+        return "ĐÃ QUÁ HẠN! Chạy ngay đi 🛑"
     days, rem  = divmod(total_seconds, 86400)
     hours, rem = divmod(rem, 3600)
     minutes, _ = divmod(rem, 60)
-    if days > 0:   return f"{days} ngày {hours} giờ {minutes} phút"
-    if hours > 0:  return f"{hours} giờ {minutes} phút"
-    return f"{minutes} phút"
+    if days > 3:   return f"⏳ Còn {days} ngày {hours} giờ — th余裕 lắm!"
+    if days > 0:   return f"⚡ Còn {days} ngày {hours} giờ {minutes} phút — cố lên!"
+    if hours > 3:  return f"🔥 Còn {hours} giờ {minutes} phút — nhanh lên nào!"
+    if hours > 0:  return f"🚨 Chỉ còn {hours} giờ {minutes} phút — KHẨN CẤP!"
+    return f"💀 Chỉ còn {minutes} phút!!! FULL SEND!!!"
 
 def get_user_name(user_id, users_df):
     match = users_df[users_df["User_ID"] == user_id]
-    return match.iloc[0]["Tên"] if not match.empty else f"Unknown ({user_id})"
+    return match.iloc[0]["Tên"] if not match.empty else f"Ẩn danh ({user_id})"
 
 # ═══════════════════════════════════════════════════════════
-#  4. AUTH SYSTEM
+#  5. AUTH SYSTEM
 # ═══════════════════════════════════════════════════════════
 
 def show_auth_page(data):
@@ -303,19 +501,20 @@ def show_auth_page(data):
                 fresh_data  = fetch_all_data()
                 fresh_users = fresh_data["users"]
                 if fresh_users.empty:
-                    st.error("Hệ thống chưa có tài khoản nào. Vui lòng đăng ký!")
+                    st.error("👻 Chưa có ai ở đây cả! Hãy đăng ký tài khoản đầu tiên đi!")
                 else:
                     user_match = fresh_users[
                         (fresh_users["User_ID"] == log_id) &
                         (fresh_users["Password"] == log_pass)
                     ]
                     if not user_match.empty:
+                        name = user_match.iloc[0]["Tên"]
                         st.session_state['logged_in']    = True
                         st.session_state['current_user'] = user_match.iloc[0].to_dict()
-                        st.success("Đăng nhập thành công!")
+                        st.success(msg_login_success(name))
                         st.rerun()
                     else:
-                        st.error("Sai User ID hoặc mật khẩu!")
+                        st.error(msg_login_fail())
 
         with tab_reg:
             st.subheader("Tạo tài khoản mới")
@@ -329,14 +528,14 @@ def show_auth_page(data):
                 key="reg_wh_dm"
             ).strip()
 
-            if st.button("Tạo Tài Khoản", use_container_width=True):
+            if st.button("✨ Tạo Tài Khoản", use_container_width=True):
                 if not reg_name or not reg_email or not reg_pass:
-                    st.error("Vui lòng điền đầy đủ thông tin!")
+                    st.error("🙏 Điền đủ thông tin giúp mình với nha! Bỏ trống là không được đâu~")
                 else:
                     fetch_all_data.clear()
                     fresh_users = fetch_all_data()["users"]
                     if not fresh_users.empty and reg_email in fresh_users["Email"].values:
-                        st.error("Email này đã được sử dụng!")
+                        st.error("📧 Email này đã có người dùng rồi! Thử email khác xem nào~")
                     else:
                         if fresh_users.empty:
                             new_id = "U001"
@@ -351,14 +550,10 @@ def show_auth_page(data):
                             NOW().strftime("%Y-%m-%d %H:%M:%S")
                         ])
                         fetch_all_data.clear()
-                        st.success(
-                            f"🎉 Tài khoản tạo thành công!\n\n"
-                            f"**USER ID CỦA BẠN LÀ: `{new_id}`**\n\n"
-                            f"(Dùng ID này để đăng nhập và kết bạn)"
-                        )
+                        st.success(msg_register_success(new_id))
 
 # ═══════════════════════════════════════════════════════════
-#  5. MAIN APP
+#  6. MAIN APP
 # ═══════════════════════════════════════════════════════════
 
 def main_app(data):
@@ -370,7 +565,6 @@ def main_app(data):
 
     is_leader = not groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id].empty
 
-    # --- SIDEBAR ---
     with st.sidebar:
         st.markdown("## ⚔️ DEADLINE SLAYER")
         st.markdown("---")
@@ -388,7 +582,6 @@ def main_app(data):
             fetch_all_data.clear()
             st.rerun()
 
-        # Cài đặt Discord Webhook DM cá nhân
         st.markdown("---")
         st.markdown("### 🔔 Discord Webhook Cá Nhân")
         my_row    = users_df[users_df["User_ID"] == my_id]
@@ -403,7 +596,7 @@ def main_app(data):
         if st.button("💾 Lưu Webhook DM", use_container_width=True):
             update_cell_by_id(WS_USERS, "User_ID", my_id, "Discord_Webhook_DM", new_wh_dm, USER_COLS)
             fetch_all_data.clear()
-            st.toast("Đã lưu Webhook DM!")
+            st.toast(msg_webhook_saved())
 
         if is_leader:
             st.markdown("---")
@@ -411,23 +604,25 @@ def main_app(data):
             my_groups = groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id]
             grp_opts  = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_groups.iterrows()}
             sel_grp   = st.selectbox("Chọn nhóm:", options=list(grp_opts.keys()), format_func=lambda x: grp_opts[x])
-            msg_text  = st.text_area("Tin nhắn thông báo:")
-            admin_file = st.file_uploader("Đính kèm file (Tuỳ chọn)")
+            msg_text  = st.text_area("Nội dung thông báo:")
+            admin_file = st.file_uploader("📎 Đính kèm file (Tuỳ chọn)")
             if st.button("🚀 Bắn Lệnh Lên Discord", use_container_width=True, type="primary"):
                 wh  = get_group_webhook(sel_grp, groups_df)
-                msg = f"📢 **[THÔNG BÁO TỪ TRƯỞNG NHÓM {current_user['Tên']}]**\n{msg_text}"
+                msg = discord_msg_broadcast = msg_discord_broadcast(current_user['Tên']) + msg_text
                 if admin_file:
                     success = push_to_discord(msg, webhook_url=wh, file_bytes=admin_file.getvalue(), filename=admin_file.name)
                 else:
                     success = push_to_discord(msg, webhook_url=wh)
-                st.toast("Đã bắn thông báo!" if success else "Gửi thất bại. Kiểm tra lại Webhook.")
+                if success:
+                    st.toast("🚀 Thông báo đã được bắn thành công lên Discord!")
+                else:
+                    st.toast("😥 Gửi thất bại! Kiểm tra lại Discord Webhook nhé~")
 
         st.markdown("---")
-        if st.button("🔄 Cập nhật dữ liệu", use_container_width=True):
+        if st.button("🔄 Làm mới dữ liệu", use_container_width=True):
             fetch_all_data.clear()
             st.rerun()
 
-    # --- TABS ---
     t1, t2, t3, t4, t5, t6 = st.tabs([
         "📊 Dashboard Công Việc",
         "👥 Kết Bạn & Tạo Nhóm",
@@ -449,11 +644,11 @@ def main_app(data):
 
 
 # ═══════════════════════════════════════════════════════════
-#  6. TAB 1: DASHBOARD
+#  7. TAB 1: DASHBOARD
 # ═══════════════════════════════════════════════════════════
 
 def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
-    st.subheader("Bảng Tiến Độ Cá Nhân & Nhóm")
+    st.subheader("📊 Bảng Tiến Độ Cá Nhân & Nhóm")
 
     my_groups    = groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id]
     subordinates = []
@@ -466,12 +661,21 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
     ].copy()
 
     if visible_tasks.empty:
-        st.info("Chưa có công việc nào dành cho bạn hoặc nhóm của bạn.")
+        st.info("🎉 Trống trơn! Chưa có nhiệm vụ nào cả — hãy tận hưởng khoảnh khắc này đi!")
         return
 
     visible_tasks["Tiến_Độ_%"]  = visible_tasks["Tiến_Độ_%"].apply(clean_and_parse_progress)
     visible_tasks["_status"]     = visible_tasks.apply(calculate_task_status, axis=1)
     visible_tasks["_remaining"]  = visible_tasks.apply(format_time_remaining, axis=1)
+
+    status_labels = {
+        "done":    "✅ XONG RỒI",
+        "overdue": "💀 QUÁ HẠN",
+        "urgent":  "🔥 KHẨN CẤP",
+        "warning": "⚠️ SẮP ĐẾN HẠN",
+        "safe":    "😎 CÒN TH余裕",
+        "unknown": "❓ KHÔNG RÕ",
+    }
 
     for _, row in visible_tasks.iterrows():
         b_color = {
@@ -479,55 +683,59 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
             "urgent": "#f57c00", "warning": "#fbc02d", "safe": "#1976d2"
         }.get(row["_status"], "#cccccc")
         assignee_name = get_user_name(row['Người_Phụ_Trách_ID'], users_df)
+        status_label  = status_labels.get(row["_status"], row["_status"].upper())
 
         st.markdown(f"""
         <div style="border:1px solid {b_color}; border-left:5px solid {b_color}; background:#111112;
              border-radius:10px; padding:12px 16px; margin-bottom:8px;">
             <div style="display:flex; justify-content:space-between;">
                 <b>📌 {row['Tên_Công_Việc']}</b>
-                <span style="color:{b_color}; font-weight:bold;">{row['_status'].upper()}</span>
+                <span style="color:{b_color}; font-weight:bold;">{status_label}</span>
             </div>
             <div style="font-size:13px; color:#aaa; margin-top:5px;">
                 👤 Phụ trách: <b>{assignee_name}</b> | ⏰ Hạn: {row['Deadline']}
             </div>
             <div style="font-size:14px; color:{b_color}; font-weight:500; margin-top:3px;">
-                ⏳ Đếm ngược: {row['_remaining']} | Tiến độ: {row['Tiến_Độ_%']}%
+                {row['_remaining']} | Tiến độ: {row['Tiến_Độ_%']}%
             </div>
         </div>
         """, unsafe_allow_html=True)
 
         if row['Người_Phụ_Trách_ID'] == my_id:
-            with st.expander("Tương tác & Cập nhật & Nộp Minh Chứng"):
+            with st.expander("🛠 Cập nhật & Nộp Minh Chứng"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    np_ = st.slider("Cập nhật %", 0, 100, int(row["Tiến_Độ_%"]), key=f"sld_{row['ID']}")
+                    np_ = st.slider("Tiến độ %", 0, 100, int(row["Tiến_Độ_%"]), key=f"sld_{row['ID']}")
                     if st.button("💾 Lưu Tiến Độ", key=f"btn_{row['ID']}"):
                         update_cell_by_id(WS_TASKS, "ID", row["ID"], "Tiến_Độ_%", np_, TASK_COLS)
                         if np_ == 100:
                             update_cell_by_id(WS_TASKS, "ID", row["ID"], "Trạng_Thái", "Đã xong", TASK_COLS)
+                        st.success(msg_progress_saved(np_))
                         st.rerun()
                 with c2:
-                    st.markdown("**Nộp file minh chứng / Tài liệu đồ án**")
-                    proof_file = st.file_uploader("Gửi thẳng lên Discord nhóm", key=f"file_{row['ID']}")
-                    if st.button("📤 Nộp lên Discord", key=f"proof_btn_{row['ID']}"):
+                    st.markdown("**📤 Nộp minh chứng lên Discord**")
+                    proof_file = st.file_uploader("Chọn file để gửi~", key=f"file_{row['ID']}")
+                    if st.button("🚀 Nộp lên Discord", key=f"proof_btn_{row['ID']}"):
                         if proof_file:
                             assignee_groups = groups_df[groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False)]
                             sent_count = 0
                             for _, grp in assignee_groups.iterrows():
                                 wh = str(grp.get("Discord_Webhook", "")).strip()
                                 if wh:
-                                    msg = f"✅ **{assignee_name}** đã nộp minh chứng cho task: **{row['Tên_Công_Việc']}**"
-                                    if push_to_discord(msg, webhook_url=wh, file_bytes=proof_file.getvalue(), filename=proof_file.name):
+                                    msg = discord_proof_sent(assignee_name, row['Tên_Công_Việc'])
+                                    if push_to_discord(msg, webhook_url=wh,
+                                                       file_bytes=proof_file.getvalue(),
+                                                       filename=proof_file.name):
                                         sent_count += 1
                             if sent_count > 0:
-                                st.success("Đã đẩy file minh chứng lên Discord nhóm!")
+                                st.success(msg_proof_sent())
                             else:
-                                st.warning("Thất bại. Nhóm chưa cài Discord Webhook.")
+                                st.warning("😅 Gửi thất bại! Có vẻ nhóm của bạn chưa cài Discord Webhook — nhờ trưởng nhóm setup giúp nhé~")
                         else:
-                            st.error("Bạn chưa đính kèm file nào!")
+                            st.error("🙈 Ủa bạn chưa đính kèm file nào hết! Chọn file rồi mới nộp được nha~")
 
 # ═══════════════════════════════════════════════════════════
-#  7. TAB 2: KẾT BẠN & TẠO NHÓM
+#  8. TAB 2: KẾT BẠN & TẠO NHÓM
 # ═══════════════════════════════════════════════════════════
 
 def render_network(users_df, groups_df, my_id, my_friends_list):
@@ -535,33 +743,33 @@ def render_network(users_df, groups_df, my_id, my_friends_list):
 
     with c1:
         st.subheader("🔍 Tìm & Kết Bạn")
-        search_id = st.text_input("Nhập User ID để tìm kiếm (VD: U001):").strip()
-        if st.button("Kết bạn"):
+        search_id = st.text_input("Nhập User ID của người bạn muốn kết bạn:").strip()
+        if st.button("🤝 Kết bạn nào!"):
             if search_id == my_id:
-                st.warning("Bạn không thể tự kết bạn với chính mình!")
+                st.warning("🪞 Ủa bạn đang cố kết bạn với chính mình? Self-love là tốt nhưng không làm vậy được đâu nhé 😂")
             elif search_id in my_friends_list:
-                st.info("Người này đã là bạn bè của bạn rồi.")
+                st.info("👯 Người này đã là bạn bè của bạn rồi! Chơi thân hơn nữa đi~")
             else:
                 target_user = users_df[users_df["User_ID"] == search_id]
                 if target_user.empty:
-                    st.error("Không tìm thấy người dùng mang ID này!")
+                    st.error("🔍 Tìm mãi không thấy! Kiểm tra lại ID xem có nhập nhầm không nhé~")
                 else:
                     new_friends = my_friends_list + [search_id]
                     update_cell_by_id(WS_USERS, "User_ID", my_id, "Bạn_Bè", ",".join(new_friends), USER_COLS)
-                    st.success(f"Đã thêm {target_user.iloc[0]['Tên']} vào danh sách bạn bè!")
+                    st.success(msg_friend_added(target_user.iloc[0]['Tên']))
                     st.rerun()
 
         st.markdown("---")
-        st.markdown("**Danh sách bạn bè của bạn:**")
+        st.markdown("**👥 Danh sách bạn bè của bạn:**")
         if not my_friends_list:
-            st.caption("Bạn chưa có người bạn nào.")
+            st.caption("🦗 Chưa có bạn nào... Đi kết bạn thêm đi! Deadline một mình buồn lắm~")
         for f_id in my_friends_list:
-            st.markdown(f"- {get_user_name(f_id, users_df)} (`{f_id}`)")
+            st.markdown(f"- 👤 {get_user_name(f_id, users_df)} (`{f_id}`)")
 
     with c2:
         st.subheader("🏢 Tạo Nhóm Học Tập Mới")
-        st.markdown("Người tạo nhóm sẽ tự động trở thành Trưởng Nhóm.")
-        grp_name    = st.text_input("Tên nhóm học tập:")
+        st.markdown("🎖️ Người tạo nhóm sẽ tự động trở thành Trưởng Nhóm — quyền lực đấy!")
+        grp_name    = st.text_input("Đặt tên nhóm ngầu ngầu vào:")
         grp_webhook = st.text_input(
             "🤖 Discord Webhook URL của nhóm (tuỳ chọn):",
             placeholder="https://discord.com/api/webhooks/...",
@@ -570,16 +778,16 @@ def render_network(users_df, groups_df, my_id, my_friends_list):
 
         friend_options   = {f_id: f"{get_user_name(f_id, users_df)} ({f_id})" for f_id in my_friends_list}
         selected_friends = st.multiselect(
-            "Chọn bạn bè thêm vào nhóm:",
+            "Chọn đồng đội cho nhóm:",
             options=list(friend_options.keys()),
             format_func=lambda x: friend_options[x]
         )
 
-        if st.button("Tạo Nhóm", type="primary"):
+        if st.button("🚀 Thành lập nhóm!", type="primary"):
             if not grp_name:
-                st.error("Vui lòng nhập tên nhóm!")
+                st.error("✏️ Đặt tên nhóm đi bạn ơi! Tên gì cũng được, miễn là ngầu~")
             elif not selected_friends:
-                st.error("Nhóm phải có ít nhất 1 thành viên ngoài bạn!")
+                st.error("👀 Nhóm phải có ít nhất 1 người nữa ngoài bạn chứ! Mời bạn bè vào đi~")
             else:
                 if groups_df.empty:
                     new_gid = "G001"
@@ -594,46 +802,42 @@ def render_network(users_df, groups_df, my_id, my_friends_list):
                     grp_webhook, NOW().strftime("%Y-%m-%d")
                 ])
                 if grp_webhook:
-                    push_to_discord(
-                        f"🎉 Nhóm **{grp_name}** đã được tạo!",
-                        webhook_url=grp_webhook
-                    )
-                st.success(f"Đã tạo nhóm {grp_name} thành công!")
+                    push_to_discord(discord_group_created(grp_name), webhook_url=grp_webhook)
+                st.success(msg_group_created(grp_name))
                 st.rerun()
 
         st.markdown("---")
-        st.markdown("**Các nhóm bạn tham gia:**")
+        st.markdown("**🏅 Các nhóm bạn đang tham gia:**")
         my_joined_groups = groups_df[groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False)]
         if my_joined_groups.empty:
-            st.caption("Chưa tham gia nhóm nào.")
+            st.caption("🏜️ Chưa có nhóm nào... Tạo nhóm mới hoặc nhờ bạn bè thêm vào nhé!")
         for _, g in my_joined_groups.iterrows():
             role    = "👑 Trưởng nhóm" if g["Trưởng_Nhóm_ID"] == my_id else "👤 Thành viên"
-            has_bot = "🤖" if str(g.get("Discord_Webhook", "")).strip() else "🔕"
-            st.markdown(f"- **{g['Tên_Nhóm']}** ({role}) {has_bot}")
+            has_bot = "🤖 Bot ON" if str(g.get("Discord_Webhook", "")).strip() else "🔕 Bot OFF"
+            st.markdown(f"- **{g['Tên_Nhóm']}** — {role} | {has_bot}")
 
-    # --- QUẢN LÝ NHÓM DÀNH CHO TRƯỞNG NHÓM ---
     st.markdown("---")
     st.subheader("⚙️ Quản Lý Nhóm (Dành cho Trưởng Nhóm)")
     my_led_groups = groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id]
 
     if my_led_groups.empty:
-        st.info("Bạn chưa làm trưởng nhóm nào. Hãy tạo nhóm mới để trải nghiệm tính năng này.")
+        st.info("👀 Bạn chưa làm trưởng nhóm nào! Tạo nhóm đi rồi trải nghiệm cảm giác làm sếp nào~")
     else:
         edit_grp_id = st.selectbox(
-            "Chọn nhóm để chỉnh sửa/xóa:",
+            "Chọn nhóm để chỉnh sửa:",
             options=my_led_groups["Group_ID"].tolist(),
             format_func=lambda x: my_led_groups[my_led_groups["Group_ID"] == x]["Tên_Nhóm"].iloc[0]
         )
         grp_data = my_led_groups[my_led_groups["Group_ID"] == edit_grp_id].iloc[0]
 
-        with st.expander(f"🛠 Chỉnh sửa: {grp_data['Tên_Nhóm']}", expanded=True):
+        with st.expander(f"🛠 Chỉnh sửa nhóm: {grp_data['Tên_Nhóm']}", expanded=True):
             new_grp_name = st.text_input("Đổi tên nhóm:", value=grp_data["Tên_Nhóm"], key=f"name_{edit_grp_id}")
             new_webhook  = st.text_input("Đổi Discord Webhook:", value=grp_data.get("Discord_Webhook", ""), key=f"wh_{edit_grp_id}")
 
-            current_members     = [m.strip() for m in str(grp_data["Thành_Viên_IDs"]).split(",") if m.strip() and m.strip() != my_id]
-            valid_cur_members   = [m for m in current_members if m in friend_options]
-            new_members         = st.multiselect(
-                "Thêm/Bớt thành viên (từ danh sách bạn bè):",
+            current_members   = [m.strip() for m in str(grp_data["Thành_Viên_IDs"]).split(",") if m.strip() and m.strip() != my_id]
+            valid_cur_members = [m for m in current_members if m in friend_options]
+            new_members = st.multiselect(
+                "Thêm/Bớt thành viên:",
                 options=list(friend_options.keys()),
                 default=valid_cur_members,
                 format_func=lambda x: friend_options[x],
@@ -642,47 +846,47 @@ def render_network(users_df, groups_df, my_id, my_friends_list):
 
             col_save, col_del = st.columns(2)
             with col_save:
-                if st.button("💾 Lưu Thay Đổi Nhóm", type="primary", use_container_width=True):
+                if st.button("💾 Lưu thay đổi", type="primary", use_container_width=True):
                     final_members = [my_id] + new_members
                     update_cell_by_id(WS_GROUPS, "Group_ID", edit_grp_id, "Tên_Nhóm", new_grp_name, GROUP_COLS)
                     update_cell_by_id(WS_GROUPS, "Group_ID", edit_grp_id, "Thành_Viên_IDs", ",".join(final_members), GROUP_COLS)
                     update_cell_by_id(WS_GROUPS, "Group_ID", edit_grp_id, "Discord_Webhook", new_webhook, GROUP_COLS)
-                    st.success("Đã cập nhật thông tin nhóm!")
+                    st.success(msg_group_updated())
                     st.rerun()
             with col_del:
-                if st.button("🗑️ Xóa Nhóm Này", use_container_width=True):
+                if st.button("💥 Giải tán nhóm", use_container_width=True):
                     delete_row_by_id(WS_GROUPS, "Group_ID", edit_grp_id, GROUP_COLS)
-                    st.success("Đã xóa nhóm thành công!")
+                    st.success(msg_group_deleted())
                     st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-#  8. TAB 3: GIAO VIỆC
+#  9. TAB 3: GIAO VIỆC
 # ═══════════════════════════════════════════════════════════
 
 def render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list):
-    st.subheader("📋 Giao Việc (Chỉ giao được cho Bạn Bè hoặc Bản thân)")
+    st.subheader("📋 Giao Việc — Chỉ giao được cho Bạn Bè hoặc Bản thân")
 
-    assignee_options = {my_id: f"Tự làm ({get_user_name(my_id, users_df)})"}
+    assignee_options = {my_id: f"🙋 Tự mình chiến ({get_user_name(my_id, users_df)})"}
     for f_id in my_friends_list:
-        assignee_options[f_id] = f"{get_user_name(f_id, users_df)} (Bạn bè)"
+        assignee_options[f_id] = f"👤 {get_user_name(f_id, users_df)} (Đồng đội)"
 
     with st.form("assign_form"):
         t_name      = st.text_input("Tên Nhiệm Vụ *")
-        subj        = st.text_input("Thuộc môn học")
+        subj        = st.text_input("Thuộc môn học nào?")
         assignee_id = st.selectbox(
-            "Chọn người làm *",
+            "Ai sẽ gánh task này? *",
             options=list(assignee_options.keys()),
             format_func=lambda x: assignee_options[x]
         )
         col1, col2 = st.columns(2)
-        with col1: d_date = st.date_input("Ngày chốt", min_value=NOW().date())
+        with col1: d_date = st.date_input("Ngày chốt deadline", min_value=NOW().date())
         with col2: d_time = st.time_input("Giờ chốt")
-        pri   = st.selectbox("Độ quan trọng", ["Cao", "Trung bình", "Thấp"])
-        notes = st.text_area("Ghi chú")
+        pri   = st.selectbox("Mức độ quan trọng", ["Cao", "Trung bình", "Thấp"])
+        notes = st.text_area("Ghi chú thêm (nếu có)")
 
-        if st.form_submit_button("Phát Lệnh 🚀"):
+        if st.form_submit_button("⚡ Phát Lệnh!"):
             if not t_name:
-                st.error("Không được để trống tên!")
+                st.error("✏️ Đặt tên cho nhiệm vụ đi nào! Không có tên thì biết chiến cái gì~")
             else:
                 new_id  = f"T{len(tasks_df)+1:03d}" if not tasks_df.empty else "T001"
                 full_dl = f"{d_date} {d_time.strftime('%H:%M:%S')}"
@@ -691,56 +895,47 @@ def render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list):
                     "Chưa xong", 0, "Bắt đầu", notes, 5, "",
                     NOW().strftime("%Y-%m-%d %H:%M:%S"), ""
                 ])
+                assignee_name = get_user_name(assignee_id, users_df)
                 assignee_groups = groups_df[groups_df["Thành_Viên_IDs"].str.contains(assignee_id, na=False)]
                 notified = set()
                 for _, grp in assignee_groups.iterrows():
                     wh = str(grp.get("Discord_Webhook", "")).strip()
                     if wh and wh not in notified:
                         push_to_discord(
-                            f"🚨 Giao việc mới: **{t_name}** → {get_user_name(assignee_id, users_df)}!\n"
-                            f"📅 Hạn: {full_dl} | 🔥 Ưu tiên: {pri}",
+                            discord_task_assigned(t_name, assignee_name, full_dl, pri),
                             webhook_url=wh
                         )
                         notified.add(wh)
-                st.success("Giao việc thành công!")
+                st.success(msg_task_assigned(t_name, assignee_name))
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-#  9. TAB 4: CHAT (NHÓM + CÁ NHÂN)
+#  10. TAB 4: CHAT (NHÓM + CÁ NHÂN)
 # ═══════════════════════════════════════════════════════════
 
 def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
-    """
-    Tab Chat với 2 sub-tab:
-      • Chat Nhóm  – lưu vào sheet ChatRoom, đẩy Discord Webhook nhóm
-      • Tin Nhắn Riêng (DM) – lưu vào sheet DirectMessages, đẩy Discord Webhook cá nhân người nhận
-    """
     st.subheader("💬 Chat")
-
     sub_group, sub_dm = st.tabs(["🏢 Chat Nhóm", "🔒 Tin Nhắn Riêng (DM)"])
 
-    # ── 9a. CHAT NHÓM ───────────────────────────────────────
     with sub_group:
         my_joined_groups = groups_df[groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False)]
-
         if my_joined_groups.empty:
-            st.warning("Bạn chưa có nhóm nào để chat. Hãy tạo nhóm ở tab 'Kết Bạn & Tạo Nhóm' nhé.")
+            st.warning("🏜️ Bạn chưa có nhóm nào để chat! Qua tab 'Kết Bạn & Tạo Nhóm' lập nhóm đi nào~")
         else:
             group_options = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_joined_groups.iterrows()}
             selected_gid  = st.selectbox(
-                "Chọn nhóm:",
+                "Chọn nhóm để chat:",
                 options=list(group_options.keys()),
                 format_func=lambda x: group_options[x],
                 key="chat_grp_select"
             )
 
-            # Hiển thị tin nhắn nhóm
             st.markdown("---")
             chat_container = st.container(height=350)
             with chat_container:
                 group_chats = chat_df[chat_df["Group_Nhận_ID"] == selected_gid]
                 if group_chats.empty:
-                    st.caption("Chưa có tin nhắn nào trong nhóm này.")
+                    st.caption("🦗 Chưa có ai nhắn gì cả... Phá băng đi nào! Gửi tin nhắn đầu tiên đây~")
                 for _, row in group_chats.iterrows():
                     sender_name = get_user_name(row["Người_Gửi_ID"], users_df)
                     is_me       = row["Người_Gửi_ID"] == my_id
@@ -752,11 +947,10 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
                         <span>{row['Nội_Dung']}</span>
                     </div>""", unsafe_allow_html=True)
 
-            # Form gửi tin nhắn nhóm
             with st.form("chat_grp_form", clear_on_submit=True):
-                msg_grp     = st.text_input("Nhập tin nhắn...", key="grp_msg_input")
-                upload_grp  = st.file_uploader(
-                    "📎 Đính kèm tài liệu (Gửi lên Discord nhóm)",
+                msg_grp    = st.text_input("Nhập tin nhắn vào đây...", key="grp_msg_input")
+                upload_grp = st.file_uploader(
+                    "📎 Đính kèm tài liệu (Gửi thẳng lên Discord nhóm)",
                     help="Discord Webhook hỗ trợ file tối đa 8MB–25MB.",
                     key="grp_file_input"
                 )
@@ -770,77 +964,67 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
                                 NOW().strftime("%Y-%m-%d %H:%M:%S"),
                                 my_id, selected_gid, sheet_msg
                             ])
-
                         wh = get_group_webhook(selected_gid, groups_df)
                         if wh:
                             sender      = get_user_name(my_id, users_df)
                             group_label = group_options[selected_gid]
-                            discord_msg = (
-                                f"💬 **{sender}** › [{group_label}]:\n{msg_grp.strip()}"
-                                if msg_grp.strip()
-                                else f"📎 **{sender}** vừa gửi tệp đính kèm vào nhóm **{group_label}**."
-                            )
+                            if msg_grp.strip():
+                                d_msg = discord_group_chat(sender, group_label, msg_grp.strip())
+                            else:
+                                d_msg = f"📎 **{sender}** vừa thả tài liệu vào nhóm **{group_label}** — check ngay nào!"
                             if upload_grp:
-                                push_to_discord(discord_msg, webhook_url=wh,
+                                push_to_discord(d_msg, webhook_url=wh,
                                                 file_bytes=upload_grp.getvalue(), filename=upload_grp.name)
                             else:
-                                push_to_discord(discord_msg, webhook_url=wh)
+                                push_to_discord(d_msg, webhook_url=wh)
                         st.rerun()
                     else:
-                        st.warning("Vui lòng nhập tin nhắn hoặc đính kèm file.")
+                        st.warning("💭 Nhắn gì đi chứ! Hoặc đính kèm file cũng được~")
 
-    # ── 9b. TIN NHẮN RIÊNG (DM) ─────────────────────────────
     with sub_dm:
         if not my_friends_list:
-            st.warning("Bạn chưa có bạn bè nào. Hãy kết bạn ở tab 'Kết Bạn & Tạo Nhóm' để nhắn tin riêng.")
+            st.warning("👀 Chưa có bạn bè nào để nhắn tin riêng! Kết bạn thêm đi rồi DM nhau nào~")
         else:
             friend_opts = {f_id: f"{get_user_name(f_id, users_df)} ({f_id})" for f_id in my_friends_list}
             selected_friend = st.selectbox(
-                "Chọn người để nhắn tin riêng:",
+                "Nhắn tin riêng với ai?",
                 options=list(friend_opts.keys()),
                 format_func=lambda x: friend_opts[x],
                 key="dm_friend_select"
             )
 
-            # Kiểm tra webhook của người nhận
             receiver_wh = get_user_dm_webhook(selected_friend, users_df)
             if receiver_wh:
-                st.caption(f"🤖 Người nhận đã cài Discord Webhook cá nhân — tin nhắn sẽ tự động đẩy lên Discord của họ.")
+                st.caption(f"🤖 Người này đã cài Discord Webhook — tin nhắn sẽ tự động ping họ trên Discord!")
             else:
-                st.caption(f"🔕 Người nhận chưa cài Discord Webhook cá nhân — tin nhắn chỉ hiển thị trên web.")
+                st.caption(f"🔕 Người này chưa cài Discord Webhook cá nhân — tin nhắn chỉ hiển thị trên web thôi nhé.")
 
             st.markdown("---")
-
-            # Lọc tin nhắn DM giữa 2 người (2 chiều)
             dm_container = st.container(height=350)
             with dm_container:
-                if dm_df.empty:
-                    st.caption("Chưa có tin nhắn nào.")
-                else:
-                    convo = dm_df[
-                        ((dm_df["Người_Gửi_ID"] == my_id)      & (dm_df["Người_Nhận_ID"] == selected_friend)) |
-                        ((dm_df["Người_Gửi_ID"] == selected_friend) & (dm_df["Người_Nhận_ID"] == my_id))
-                    ].copy()
+                convo = dm_df[
+                    ((dm_df["Người_Gửi_ID"] == my_id)          & (dm_df["Người_Nhận_ID"] == selected_friend)) |
+                    ((dm_df["Người_Gửi_ID"] == selected_friend) & (dm_df["Người_Nhận_ID"] == my_id))
+                ].copy() if not dm_df.empty else pd.DataFrame(columns=DM_COLS)
 
-                    if convo.empty:
-                        st.caption(f"Chưa có tin nhắn riêng nào với {get_user_name(selected_friend, users_df)}.")
-                    for _, row in convo.iterrows():
-                        sender_name = get_user_name(row["Người_Gửi_ID"], users_df)
-                        is_me       = row["Người_Gửi_ID"] == my_id
-                        css_class   = "chat-me" if is_me else "chat-private"
-                        label_color = "#4CAF50" if is_me else "#7289DA"
-                        st.markdown(f"""
-                        <div class="{css_class}">
-                            <small style='color:{label_color};'><b>{sender_name}</b> • {row['Thời_Gian']}</small><br>
-                            <span>{row['Nội_Dung']}</span>
-                        </div>""", unsafe_allow_html=True)
+                if convo.empty:
+                    st.caption(f"🌸 Chưa có tin nhắn nào với {get_user_name(selected_friend, users_df)}. Bắt đầu cuộc trò chuyện đi nào~")
+                for _, row in convo.iterrows():
+                    sender_name = get_user_name(row["Người_Gửi_ID"], users_df)
+                    is_me       = row["Người_Gửi_ID"] == my_id
+                    css_class   = "chat-me" if is_me else "chat-private"
+                    label_color = "#4CAF50" if is_me else "#7289DA"
+                    st.markdown(f"""
+                    <div class="{css_class}">
+                        <small style='color:{label_color};'><b>{sender_name}</b> • {row['Thời_Gian']}</small><br>
+                        <span>{row['Nội_Dung']}</span>
+                    </div>""", unsafe_allow_html=True)
 
-            # Form gửi DM
             with st.form("chat_dm_form", clear_on_submit=True):
-                msg_dm    = st.text_input("Nhập tin nhắn riêng...", key="dm_msg_input")
+                msg_dm    = st.text_input("Nhập tin nhắn bí mật...", key="dm_msg_input")
                 upload_dm = st.file_uploader(
                     "📎 Đính kèm file (Gửi lên Discord cá nhân người nhận)",
-                    help="Cần người nhận đã cài Discord Webhook DM cá nhân.",
+                    help="Cần người nhận đã cài Discord Webhook DM.",
                     key="dm_file_input"
                 )
                 if st.form_submit_button("🔒 Gửi Tin Nhắn Riêng"):
@@ -853,33 +1037,29 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
                                 NOW().strftime("%Y-%m-%d %H:%M:%S"),
                                 my_id, selected_friend, sheet_msg
                             ])
-
-                        # Đẩy lên Discord Webhook DM của NGƯỜI NHẬN
                         if receiver_wh:
                             sender_name = get_user_name(my_id, users_df)
-                            discord_msg = (
-                                f"📩 **Tin nhắn riêng từ {sender_name}:**\n{msg_dm.strip()}"
-                                if msg_dm.strip()
-                                else f"📎 **{sender_name}** vừa gửi cho bạn một tệp đính kèm."
-                            )
+                            if msg_dm.strip():
+                                d_msg = discord_dm(sender_name, msg_dm.strip())
+                            else:
+                                d_msg = f"📎 **{sender_name}** vừa gửi cho bạn một tệp đính kèm đặc biệt~ Check ngay nhé!"
                             if upload_dm:
-                                push_to_discord(discord_msg, webhook_url=receiver_wh,
+                                push_to_discord(d_msg, webhook_url=receiver_wh,
                                                 file_bytes=upload_dm.getvalue(), filename=upload_dm.name)
                             else:
-                                push_to_discord(discord_msg, webhook_url=receiver_wh)
-
+                                push_to_discord(d_msg, webhook_url=receiver_wh)
                         st.rerun()
                     else:
-                        st.warning("Vui lòng nhập tin nhắn hoặc đính kèm file.")
+                        st.warning("💭 Nhắn gì đi! Gửi tin nhắn trống thì người ta không hiểu gì hết~")
 
 # ═══════════════════════════════════════════════════════════
-#  10. TAB 5: LEADERBOARD
+#  11. TAB 5: LEADERBOARD
 # ═══════════════════════════════════════════════════════════
 
 def render_leaderboard(tasks_df, users_df):
-    st.subheader("🏆 Bảng Xếp Hạng")
+    st.subheader("🏆 Bảng Xếp Hạng — Ai là Deadline Slayer số 1?")
     if tasks_df.empty:
-        st.info("Chưa có data.")
+        st.info("🎲 Chưa có task nào để xếp hạng! Giao việc đi rồi xem ai cày task nhất nhé~")
         return
 
     tasks = tasks_df.copy()
@@ -892,19 +1072,27 @@ def render_leaderboard(tasks_df, users_df):
         "Tiến độ TB": f"{int(g['Tiến_Độ_%'].mean())}%",
     })).reset_index()
 
-    grouped["Tên Thành Viên"] = grouped["Người_Phụ_Trách_ID"].apply(lambda x: get_user_name(x, users_df))
-    grouped = grouped[["Tên Thành Viên", "Tổng Task", "Đã Xong", "Tiến độ TB"]]
-    st.dataframe(grouped.sort_values(by="Đã Xong", ascending=False), use_container_width=True)
+    grouped["🏅 Chiến Binh"] = grouped["Người_Phụ_Trách_ID"].apply(lambda x: get_user_name(x, users_df))
+    grouped = grouped[["🏅 Chiến Binh", "Tổng Task", "Đã Xong", "Tiến độ TB"]]
+    grouped = grouped.sort_values(by="Đã Xong", ascending=False).reset_index(drop=True)
+    grouped.index = grouped.index + 1  # bắt đầu từ 1
+
+    # Thêm huy chương
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    grouped["🏅 Chiến Binh"] = grouped.apply(
+        lambda r: f"{medals.get(r.name, '  ')} {r['🏅 Chiến Binh']}", axis=1
+    )
+    st.dataframe(grouped, use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════
-#  11. TAB 6: QUẢN LÝ TÀI KHOẢN
+#  12. TAB 6: QUẢN LÝ TÀI KHOẢN
 # ═══════════════════════════════════════════════════════════
 
 def render_account_management(users_df, my_id):
     st.subheader("🗑️ Quản Lý Tài Khoản")
-    st.markdown("### Danh sách tất cả tài khoản trong hệ thống")
+    st.markdown("### 👥 Danh sách tất cả chiến binh trong hệ thống")
     if users_df.empty:
-        st.info("Không có tài khoản nào.")
+        st.info("👻 Không có ai cả! Hệ thống trống rỗng như sa mạc~")
         return
 
     display_cols = ["User_ID", "Tên", "Email", "Ngày_Tạo"]
@@ -912,11 +1100,11 @@ def render_account_management(users_df, my_id):
 
     st.markdown("---")
     st.markdown("### 🗑️ Xóa Tài Khoản")
-    st.warning("⚠️ Bạn không thể xóa tài khoản của chính mình ở đây.")
+    st.warning("⚠️ Không thể xóa tài khoản đang đăng nhập. Muốn xóa chính mình thì... đừng nhé 😅")
 
     other_users = users_df[users_df["User_ID"] != my_id]
     if other_users.empty:
-        st.info("Không có tài khoản nào khác để xóa.")
+        st.info("😎 Chỉ có mình bạn thôi! Không có ai để xóa cả~")
         return
 
     user_opts = {
@@ -924,15 +1112,15 @@ def render_account_management(users_df, my_id):
         for _, row in other_users.iterrows()
     }
     del_id  = st.selectbox("Chọn tài khoản cần xóa:", options=list(user_opts.keys()), format_func=lambda x: user_opts[x])
-    confirm = st.checkbox(f"Tôi xác nhận muốn xóa tài khoản `{del_id}`")
-    if st.button("🗑️ Xóa Tài Khoản", type="primary", disabled=not confirm):
+    confirm = st.checkbox(f"✅ Tôi xác nhận muốn xóa `{del_id}` — không hối hận đâu nhé!")
+    if st.button("💥 Xóa Tài Khoản", type="primary", disabled=not confirm):
         ok = delete_row_by_id(WS_USERS, "User_ID", del_id, USER_COLS)
         if ok:
-            st.success(f"Đã xóa tài khoản `{del_id}` thành công!")
+            st.success(msg_account_deleted(del_id))
             fetch_all_data.clear()
             st.rerun()
         else:
-            st.error("Không tìm thấy hoặc không thể xóa tài khoản này.")
+            st.error("😵 Ủa xóa không được! Có thể tài khoản này đã tự biến mất rồi? Thử refresh lại nhé~")
 
 # ═══════════════════════════════════════════════════════════
 #  MAIN EXECUTION
