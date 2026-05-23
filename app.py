@@ -1,5 +1,5 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime
 import random
 import pandas as pd
 import requests
@@ -10,27 +10,11 @@ from zoneinfo import ZoneInfo
 import json
 import os
 
-# --- ĐOẠN CODE BẠN BỊ THIẾU ĐỂ TẠO CHÌA KHÓA TRÊN CLOUD ---
+# --- TẠO CHÌA KHÓA TRÊN CLOUD TỪ SECRETS ---
 if not os.path.exists("credentials.json"):
     if "gcp_service_account" in st.secrets:
         with open("credentials.json", "w") as f:
             json.dump(dict(st.secrets["gcp_service_account"]), f)
-# -----------------------------------------------------------
-
-# ─── TIMEZONE CONFIG ────────────────────────────────────────
-TZ = ZoneInfo("Asia/Ho_Chi_Minh")
-def NOW():
-    return datetime.now(TZ)
-
-import streamlit as st
-from datetime import datetime, timedelta
-import random
-import pandas as pd
-import requests
-import plotly.express as px
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from zoneinfo import ZoneInfo
 
 # ─── TIMEZONE CONFIG ────────────────────────────────────────
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -90,7 +74,6 @@ WS_CHAT   = "ChatRoom"
 
 TASK_COLS  = ["ID", "Tên_Công_Việc", "Môn_Học", "Người_Phụ_Trách_ID", "Deadline", "Độ_Ưu_Tiên", "Trạng_Thái", "Tiến_Độ_%", "Giai_Đoạn_Hiện_Tại", "Ghi_Chú", "Nhắc_Mỗi_Phút", "Nhắc_Lần_Cuối", "Ngày_Tạo", "Ngày_Cập_Nhật"]
 USER_COLS  = ["User_ID", "Password", "Tên", "Email", "Bạn_Bè", "Ngày_Tạo"]
-# ✅ Thêm cột Discord_Webhook vào Groups
 GROUP_COLS = ["Group_ID", "Tên_Nhóm", "Trưởng_Nhóm_ID", "Thành_Viên_IDs", "Discord_Webhook", "Ngày_Tạo"]
 PROOF_COLS = ["Task_ID", "Người_Nộp_ID", "Thời_Gian", "Mô_Tả", "Giai_Đoạn", "URL_File"]
 CHAT_COLS  = ["Thời_Gian", "Người_Gửi_ID", "Group_Nhận_ID", "Nội_Dung"]
@@ -179,7 +162,6 @@ def update_cell_by_id(ws_name, id_col_name, item_id, update_col_name, new_val, s
     except Exception as e:
         st.error(f"Lỗi đồng bộ: {e}")
 
-# ✅ Xóa hàng theo ID
 def delete_row_by_id(ws_name, id_col_name, item_id, schema_cols):
     ws = get_worksheet_target(ws_name)
     if not ws:
@@ -197,16 +179,26 @@ def delete_row_by_id(ws_name, id_col_name, item_id, schema_cols):
         return False
 
 # ═══════════════════════════════════════════════════════════
-#  2. DISCORD & HELPERS
+#  2. DISCORD & HELPERS (HỖ TRỢ FILE UPLOAD)
 # ═══════════════════════════════════════════════════════════
 
-def push_to_discord(message: str, webhook_url: str = "") -> bool:
-    """Gửi thông báo tới webhook Discord. Nếu không truyền webhook thì bỏ qua."""
+def push_to_discord(message: str, webhook_url: str = "", file_bytes=None, filename: str = None) -> bool:
+    """Gửi thông báo (và đính kèm file nếu có) tới webhook Discord."""
     if not webhook_url or "discord.com/api/webhooks" not in webhook_url:
         return False
     try:
-        return requests.post(webhook_url, json={"content": message}, timeout=5).status_code == 204
-    except Exception:
+        # Nếu có file đính kèm, sử dụng dạng form-data
+        if file_bytes and filename:
+            data = {"content": message}
+            files = {"file": (filename, file_bytes)}
+            resp = requests.post(webhook_url, data=data, files=files, timeout=15)
+        # Nếu không có file, gửi bằng JSON
+        else:
+            resp = requests.post(webhook_url, json={"content": message}, timeout=5)
+            
+        return resp.status_code in (200, 204)
+    except Exception as e:
+        st.warning(f"Lỗi khi gửi Discord: {str(e)}")
         return False
 
 def get_group_webhook(group_id: str, groups_df: pd.DataFrame) -> str:
@@ -279,7 +271,6 @@ def show_auth_page(data):
             log_id   = st.text_input("User ID (VD: U001)", key="log_id").strip()
             log_pass = st.text_input("Mật khẩu", type="password", key="log_pass")
             if st.button("🚀 Đăng Nhập", use_container_width=True, type="primary"):
-                # ✅ Luôn làm mới dữ liệu trước khi xác thực để tránh cache cũ
                 fetch_all_data.clear()
                 fresh_data = fetch_all_data()
                 fresh_users = fresh_data["users"]
@@ -309,7 +300,6 @@ def show_auth_page(data):
                 if not reg_name or not reg_email or not reg_pass:
                     st.error("Vui lòng điền đầy đủ thông tin!")
                 else:
-                    # ✅ Làm mới dữ liệu trước khi kiểm tra email trùng
                     fetch_all_data.clear()
                     fresh_users = fetch_all_data()["users"]
 
@@ -327,7 +317,6 @@ def show_auth_page(data):
                             new_id, reg_pass, reg_name, reg_email, "",
                             NOW().strftime("%Y-%m-%d %H:%M:%S")
                         ])
-                        # ✅ Clear cache sau khi ghi để lần đăng nhập tiếp theo thấy ngay
                         fetch_all_data.clear()
                         st.success(
                             f"🎉 Chúc mừng! Tài khoản tạo thành công.\n\n"
@@ -378,15 +367,23 @@ def main_app(data):
             grp_opts  = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_groups.iterrows()}
             sel_grp   = st.selectbox("Chọn nhóm:", options=list(grp_opts.keys()), format_func=lambda x: grp_opts[x])
             msg_text  = st.text_area("Tin nhắn thông báo:")
+            
+            # Khúc đẩy thông báo kèm file (Tùy chọn trưởng nhóm tải file lên Discord chung)
+            admin_file = st.file_uploader("Đính kèm file báo cáo/tài liệu (Tùy chọn)")
+            
             if st.button("🚀 Bắn Lệnh Lên Discord", use_container_width=True, type="primary"):
                 wh = get_group_webhook(sel_grp, groups_df)
-                if push_to_discord(
-                    f"📢 **[THÔNG BÁO TỪ TRƯỞNG NHÓM {current_user['Tên']}]**\n{msg_text}",
-                    webhook_url=wh
-                ):
+                msg = f"📢 **[THÔNG BÁO TỪ TRƯỞNG NHÓM {current_user['Tên']}]**\n{msg_text}"
+                
+                if admin_file:
+                    success = push_to_discord(msg, webhook_url=wh, file_bytes=admin_file.getvalue(), filename=admin_file.name)
+                else:
+                    success = push_to_discord(msg, webhook_url=wh)
+                    
+                if success:
                     st.toast("Đã bắn thông báo!")
                 else:
-                    st.warning("Nhóm này chưa có Discord Webhook. Hãy thêm trong mục Kết Bạn & Tạo Nhóm.")
+                    st.warning("Gửi thất bại. Hãy kiểm tra lại Discord Webhook.")
 
         st.markdown("---")
         if st.button("🔄 Cập nhật dữ liệu", use_container_width=True):
@@ -459,7 +456,7 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
         """, unsafe_allow_html=True)
 
         if row['Người_Phụ_Trách_ID'] == my_id:
-            with st.expander("Tương tác & Cập nhật"):
+            with st.expander("Tương tác & Cập nhật & Nộp Minh Chứng"):
                 c1, c2 = st.columns(2)
                 with c1:
                     np = st.slider("Cập nhật %", 0, 100, int(row["Tiến_Độ_%"]), key=f"sld_{row['ID']}")
@@ -468,6 +465,28 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
                         if np == 100:
                             update_cell_by_id(WS_TASKS, "ID", row["ID"], "Trạng_Thái", "Đã xong", TASK_COLS)
                         st.rerun()
+                
+                with c2:
+                    st.markdown("**Nộp file minh chứng / Tài liệu đồ án**")
+                    proof_file = st.file_uploader("Gửi thẳng lên Discord của các nhóm bạn tham gia", key=f"file_{row['ID']}")
+                    if st.button("📤 Nộp lên Discord", key=f"proof_btn_{row['ID']}"):
+                        if proof_file:
+                            assignee_groups = groups_df[groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False)]
+                            sent_count = 0
+                            
+                            for _, grp in assignee_groups.iterrows():
+                                wh = str(grp.get("Discord_Webhook", "")).strip()
+                                if wh:
+                                    msg = f"✅ **{assignee_name}** đã nộp tài liệu minh chứng cho task: **{row['Tên_Công_Việc']}**"
+                                    if push_to_discord(msg, webhook_url=wh, file_bytes=proof_file.getvalue(), filename=proof_file.name):
+                                        sent_count += 1
+                            
+                            if sent_count > 0:
+                                st.success("Đã đẩy file minh chứng thành công lên Discord nhóm!")
+                            else:
+                                st.warning("Thất bại. Có thể nhóm của bạn chưa cài đặt Discord Webhook.")
+                        else:
+                            st.error("Bạn chưa đính kèm file nào!")
 
 
 # --- TAB 2: KẾT BẠN & TẠO NHÓM ---
@@ -504,8 +523,7 @@ def render_network(users_df, groups_df, my_id, my_friends_list):
         st.subheader("🏢 Tạo Nhóm Học Tập Mới")
         st.markdown("Người tạo nhóm sẽ tự động trở thành Trưởng Nhóm.")
         grp_name = st.text_input("Tên nhóm học tập:")
-
-        # ✅ Trường nhập Discord Webhook URL cho nhóm
+        
         grp_webhook = st.text_input(
             "🤖 Discord Webhook URL của nhóm (tuỳ chọn):",
             placeholder="https://discord.com/api/webhooks/...",
@@ -535,11 +553,10 @@ def render_network(users_df, groups_df, my_id, my_friends_list):
                 all_members = [my_id] + selected_friends
                 append_row_data(WS_GROUPS, [
                     new_gid, grp_name, my_id, ",".join(all_members),
-                    grp_webhook,  # ✅ Lưu webhook của nhóm
+                    grp_webhook,
                     NOW().strftime("%Y-%m-%d")
                 ])
 
-                # Thông báo tới Discord nhóm vừa tạo nếu có webhook
                 if grp_webhook:
                     push_to_discord(
                         f"🎉 Nhóm **{grp_name}** đã được tạo! Trưởng nhóm: {get_user_name(my_id, pd.DataFrame())}",
@@ -597,7 +614,6 @@ def render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list):
                     NOW().strftime("%Y-%m-%d %H:%M:%S"), ""
                 ])
 
-                # ✅ Gửi thông báo tới Discord của nhóm mà assignee thuộc về
                 assignee_groups = groups_df[groups_df["Thành_Viên_IDs"].str.contains(assignee_id, na=False)]
                 notified = set()
                 for _, grp in assignee_groups.iterrows():
@@ -644,9 +660,35 @@ def render_chat(chat_df, groups_df, users_df, my_id):
 
     with st.form("chat_form", clear_on_submit=True):
         msg = st.text_input("Nhập tin nhắn...")
+        
+        # Form File đính kèm tại đây (Dành cho việc chia sẻ File)
+        uploaded_file = st.file_uploader(
+            "📎 Đính kèm tài liệu học tập/file (Gửi thẳng lên Discord nhóm)", 
+            help="Kích thước file mà bot Discord Webhook hỗ trợ tải lên mặc định tối đa là 8MB - 25MB."
+        )
+        
         if st.form_submit_button("Gửi"):
-            if msg.strip():
-                append_row_data(WS_CHAT, [NOW().strftime("%Y-%m-%d %H:%M:%S"), my_id, selected_gid, msg.strip()])
+            if msg.strip() or uploaded_file:
+                # 1. Lưu logic cho Sheet Text
+                sheet_msg = msg.strip()
+                if uploaded_file:
+                    sheet_msg += f" [📎 Đã đính kèm tài liệu: {uploaded_file.name}]"
+                
+                if sheet_msg:
+                    append_row_data(WS_CHAT, [NOW().strftime("%Y-%m-%d %H:%M:%S"), my_id, selected_gid, sheet_msg])
+
+                # 2. Xử lý đẩy lên Discord Webhook
+                wh = get_group_webhook(selected_gid, groups_df)
+                if wh:
+                    sender = get_user_name(my_id, users_df)
+                    discord_msg = f"💬 **{sender}**:\n{msg.strip()}" if msg.strip() else f"📎 **{sender}** vừa gửi một tệp đính kèm mới vào nhóm."
+                    
+                    if uploaded_file:
+                        file_bytes = uploaded_file.getvalue()
+                        push_to_discord(discord_msg, webhook_url=wh, file_bytes=file_bytes, filename=uploaded_file.name)
+                    else:
+                        push_to_discord(discord_msg, webhook_url=wh)
+                        
                 st.rerun()
 
 
@@ -672,7 +714,7 @@ def render_leaderboard(tasks_df, users_df):
     st.dataframe(grouped.sort_values(by="Đã Xong", ascending=False), use_container_width=True)
 
 
-# ✅ --- TAB 6: QUẢN LÝ TÀI KHOẢN (XÓA TÀI KHOẢN CŨ) ---
+# --- TAB 6: QUẢN LÝ TÀI KHOẢN ---
 def render_account_management(users_df, my_id):
     st.subheader("🗑️ Quản Lý Tài Khoản")
 
@@ -686,10 +728,7 @@ def render_account_management(users_df, my_id):
 
     st.markdown("---")
     st.markdown("### 🗑️ Xóa Tài Khoản")
-    st.warning(
-        "⚠️ Chỉ xóa tài khoản không còn sử dụng. "
-        "Bạn không thể xóa tài khoản của chính mình ở đây."
-    )
+    st.warning("⚠️ Chỉ xóa tài khoản không còn sử dụng. Bạn không thể xóa tài khoản của chính mình ở đây.")
 
     other_users = users_df[users_df["User_ID"] != my_id]
     if other_users.empty:
@@ -701,11 +740,7 @@ def render_account_management(users_df, my_id):
         for _, row in other_users.iterrows()
     }
 
-    del_id = st.selectbox(
-        "Chọn tài khoản cần xóa:",
-        options=list(user_opts.keys()),
-        format_func=lambda x: user_opts[x]
-    )
+    del_id = st.selectbox("Chọn tài khoản cần xóa:", options=list(user_opts.keys()), format_func=lambda x: user_opts[x])
 
     confirm = st.checkbox(f"Tôi xác nhận muốn xóa tài khoản `{del_id}`")
     if st.button("🗑️ Xóa Tài Khoản", type="primary", disabled=not confirm):
@@ -716,7 +751,6 @@ def render_account_management(users_df, my_id):
             st.rerun()
         else:
             st.error("Không tìm thấy hoặc không thể xóa tài khoản này.")
-
 
 # ═══════════════════════════════════════════════════════════
 #  MAIN EXECUTION
