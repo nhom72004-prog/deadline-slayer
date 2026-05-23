@@ -53,9 +53,7 @@ html, body, [class*="css"] { font-family: 'Space Grotesk', sans-serif; }
 
 /* ── CHAT BUBBLES ── */
 .chat-wrap { display: flex; flex-direction: column; gap: 8px; padding: 6px 2px; }
-
 .msg-bubble { display: flex; align-items: flex-end; gap: 8px; max-width: 85%; margin-bottom: 5px; }
-
 .msg-avatar {
     width: 34px; height: 34px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
@@ -553,13 +551,10 @@ def render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list):
         if my_groups.empty: st.warning("Bạn chưa làm trưởng nhóm của nhóm nào.")
         else:
             grp_opts = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_groups.iterrows()}
-            # THÊM KEY VÀO ĐÂY:
             sel_grp = st.selectbox("Chọn nhóm", list(grp_opts.keys()), format_func=lambda x: grp_opts[x], key="assign_sel_grp")
             mems = [m.strip() for m in str(groups_df[groups_df["Group_ID"] == sel_grp].iloc[0]["Thành_Viên_IDs"]).split(",") if m.strip()]
-            # THÊM KEY VÀO ĐÂY:
             target_id = st.selectbox("Chọn thành viên", mems, format_func=lambda x: get_user_name(x, users_df), key="assign_sel_member")
     else:
-        # THÊM KEY VÀO ĐÂY:
         target_id = st.selectbox("Chọn bạn bè", my_friends_list, format_func=lambda x: get_user_name(x, users_df), key="assign_sel_friend")
 
     task_name = st.text_input("Tên công việc")
@@ -577,7 +572,6 @@ def render_assign_task(users_df, groups_df, tasks_df, my_id, my_friends_list):
                 NOW().strftime("%Y-%m-%d %H:%M:%S"), ""
             ])
             
-            # Discord Notification
             if assign_to == "Thành viên nhóm":
                 grp_wh = get_group_webhook(sel_grp, groups_df)
                 if grp_wh: push_to_discord(discord_task_assigned(task_name, get_user_name(target_id, users_df), dl_str, priority), webhook_url=grp_wh)
@@ -596,14 +590,11 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
             return
         
         grp_opts = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in my_groups.iterrows()}
-        # THÊM KEY VÀO ĐÂY (Sửa lỗi trùng lặp):
         sel_grp = st.selectbox("Chọn nhóm", list(grp_opts.keys()), format_func=lambda x: grp_opts[x], key="chat_sel_grp")
         
-        # Filter and render
         messages = chat_df[chat_df["Group_Nhận_ID"] == sel_grp].sort_values("Thời_Gian")
         msg_html = render_messages_html(messages.iterrows(), my_id, users_df, "group") if not messages.empty else "<div class='chat-empty'>Chưa có tin nhắn nào. Mở bát đi!</div>"
         
-        # Display Box
         st.markdown(f"<div style='height: 400px; overflow-y: auto; background: #1a1a1a; padding: 10px; border-radius: 10px; margin-bottom: 15px;'>{msg_html}</div>", unsafe_allow_html=True)
 
         with st.form("chat_form_group", clear_on_submit=True):
@@ -621,7 +612,6 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends_list):
         if not my_friends_list:
             st.info("Chưa có bạn bè để nhắn tin!")
             return
-        # THÊM KEY VÀO ĐÂY:
         sel_friend = st.selectbox("Chọn bạn bè", my_friends_list, format_func=lambda x: get_user_name(x, users_df), key="chat_sel_friend")
         
         messages = dm_df[
@@ -650,7 +640,6 @@ def render_leaderboard(tasks_df, users_df):
         st.info("Chưa có dữ liệu để xếp hạng!")
         return
     
-    # Calculate completed tasks per user
     completed = tasks_df[tasks_df["Trạng_Thái"] == "Đã xong"]
     if completed.empty:
         st.info("Chưa có ai hoàn thành nhiệm vụ nào cả!")
@@ -678,11 +667,9 @@ def render_friend_management(users_df, my_id, my_friends_list):
             st.markdown(f"👤 **{f_name}** (`{f_id}`)")
         with c2:
             if st.button("❌ Hủy kết bạn", key=f"unfriend_{f_id}", use_container_width=True):
-                # Remove from my list
                 my_friends_list.remove(f_id)
                 update_cell_by_id(WS_USERS, "User_ID", my_id, "Bạn_Bè", ",".join(my_friends_list), USER_COLS)
                 
-                # Remove me from their list
                 their_row = users_df[users_df["User_ID"] == f_id]
                 if not their_row.empty:
                     their_friends = [x.strip() for x in str(their_row.iloc[0]["Bạn_Bè"]).split(",") if x.strip()]
@@ -695,16 +682,73 @@ def render_friend_management(users_df, my_id, my_friends_list):
                 st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-#  7. MAIN EXECUTOR
+#  7. MAIN APP FLOW
 # ═══════════════════════════════════════════════════════════
 
-def main_app(data):
-    users_df     = data["users"]
-    groups_df    = data["groups"]
-    tasks_df     = data["tasks"]
-    current_user = st.session_state['current_user']
-    my_id        = current_user["User_ID"]
-    is_leader    = not groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id].empty
+def main():
+    # Tải toàn bộ data từ Google Sheets lên
+    data = fetch_all_data()
+    
+    # Kiểm tra trạng thái đăng nhập
+    if not st.session_state['logged_in']:
+        show_auth_page(data)
     else:
-        main_app(data)
- 
+        current_user = st.session_state['current_user']
+        my_id = current_user["User_ID"]
+        my_name = current_user["Tên"]
+        
+        # Đồng bộ và phân tách danh sách bạn bè dạng chuỗi sang mảng
+        my_friends_list = [x.strip() for x in str(current_user.get("Bạn_Bè", "")).split(",") if x.strip()]
+        
+        # ─── Thanh Sidebar Thông Tin Chiến Binh ───
+        with st.sidebar:
+            st.markdown(f"### ⚔️ Chiến binh: **{my_name}**")
+            st.markdown(f"🆔 Mã số: `{my_id}`")
+            
+            # Trạng thái liên kết Discord cá nhân
+            wh_dm = current_user.get("Discord_Webhook_DM", "")
+            if wh_dm:
+                st.markdown('<div class="disc-badge disc-on">🤖 Discord DM: ON</div>', unsafe_allow_html=True)
+            else:
+                st.markdown('<div class="disc-badge disc-off">🤖 Discord DM: OFF</div>', unsafe_allow_html=True)
+            
+            st.markdown("---")
+            # Nút Đăng Xuất và làm trống bộ nhớ phiên
+            if st.button("🚪 Đăng Xuất", use_container_width=True, type="secondary"):
+                st.session_state['logged_in'] = False
+                st.session_state['current_user'] = None
+                st.rerun()
+        
+        # Kiểm tra xem tài khoản hiện tại có quyền Trưởng Nhóm không
+        is_leader = not data["groups"][data["groups"]["Trưởng_Nhóm_ID"] == my_id].empty
+        
+        # ─── Hệ Thống Tabs Chức Năng ───
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "📊 Bảng Tiến Độ", 
+            "🤝 Kết Bạn & Nhóm", 
+            "🚀 Giao Việc", 
+            "💬 Trò Chuyện", 
+            "🏆 Xếp Hạng",
+            "⚙️ Quản Lý Bạn Bè"
+        ])
+        
+        with tab1:
+            render_dashboard(data["tasks"], data["groups"], data["users"], my_id, is_leader)
+            
+        with tab2:
+            render_network(data["users"], data["groups"], my_id, my_friends_list)
+            
+        with tab3:
+            render_assign_task(data["users"], data["groups"], data["tasks"], my_id, my_friends_list)
+            
+        with tab4:
+            render_chat(data["chat"], data["dm"], data["groups"], data["users"], my_id, my_friends_list)
+            
+        with tab5:
+            render_leaderboard(data["tasks"], data["users"])
+            
+        with tab6:
+            render_friend_management(data["users"], my_id, my_friends_list)
+
+if __name__ == "__main__":
+    main()
