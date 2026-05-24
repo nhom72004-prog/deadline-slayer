@@ -188,7 +188,7 @@ def discord_dm(sender, content): return f"📩 **Tin nhắn riêng từ {sender}
 def discord_group_chat(sender, group, content): return f"💬 **{sender}** › [{group}]:\n{content}"
 
 # ═══════════════════════════════════════════════════════════
-#  3. GOOGLE SHEETS
+#  3. GOOGLE SHEETS — FIX MAJOR
 # ═══════════════════════════════════════════════════════════
 @st.cache_resource(ttl=300)
 def get_sheets_client():
@@ -281,21 +281,19 @@ def get_ws(name):
     except:
         return None
 
-def append_row_data(name, row):
+def append_row_data(name, row, schema):
+    """FIX: Chắc chắn row data luôn có đủ cột theo schema"""
     import time
     ws = get_ws(name)
     if not ws:
         st.error(f"❌ Không kết nối được sheet '{name}'! Kiểm tra credentials.")
         return False
     try:
-        schema_len = {
-            WS_TASKS: len(TASK_COLS), WS_USERS: len(USER_COLS),
-            WS_GROUPS: len(GROUP_COLS), WS_PROOFS: len(PROOF_COLS),
-            WS_CHAT: len(CHAT_COLS), WS_DM: len(DM_COLS),
-        }
-        expected = schema_len.get(name, len(row))
-        row = list(row) + [""] * max(0, expected - len(row))
-        row = row[:expected]
+        # Pad row to match schema length
+        expected_len = len(schema)
+        row = list(row) + [""] * max(0, expected_len - len(row))
+        row = row[:expected_len]
+        
         ws.append_row(row, value_input_option="USER_ENTERED")
         time.sleep(0.3)
         fetch_all_data.clear()
@@ -530,7 +528,8 @@ def show_auth_page():
                         new_id = f"U{(max(nums) + 1 if nums else 1):03d}"
                         ok = append_row_data(WS_USERS,
                                              [new_id, rp, rn, re, "", rw,
-                                              NOW().strftime("%Y-%m-%d %H:%M:%S")])
+                                              NOW().strftime("%Y-%m-%d %H:%M:%S")],
+                                             USER_COLS)
                         if ok:
                             st.success(msg_register_success(new_id))
                         else:
@@ -612,26 +611,22 @@ def main_app(data):
     with tab6: render_account_tab(users_df, my_id)
 
 # ═══════════════════════════════════════════════════════════
-#  7. DASHBOARD — FIX: hiện task của tất cả thành viên
-#     cùng nhóm, không chỉ nhóm mình làm trưởng
+#  7. DASHBOARD
 # ═══════════════════════════════════════════════════════════
 def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
     st.subheader("📊 Bảng Tiến Độ")
 
-    # Lấy tất cả nhóm mình tham gia (cả TV lẫn trưởng nhóm)
     my_groups = groups_df[
         groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False) |
         (groups_df["Trưởng_Nhóm_ID"] == my_id)
     ]
 
-    # Gom tất cả thành viên trong các nhóm mình thuộc về
     all_group_members = set()
     for _, g in my_groups.iterrows():
         for m in str(g["Thành_Viên_IDs"]).split(","):
             if m.strip():
                 all_group_members.add(m.strip())
 
-    # Hiện task: của mình + của mọi người trong cùng nhóm
     if all_group_members:
         vt = tasks_df[
             (tasks_df["Người_Phụ_Trách_ID"] == my_id) |
@@ -670,7 +665,6 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
     </div>
 </div>""", unsafe_allow_html=True)
 
-        # Chỉ cho cập nhật task được giao cho chính mình
         if row["Người_Phụ_Trách_ID"] == my_id:
             with st.expander(f"🛠 Cập nhật: {row['Tên_Công_Việc']}"):
                 c1, c2 = st.columns(2)
@@ -702,7 +696,7 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
                             st.error("🙈 Chọn file trước đã!")
 
 # ═══════════════════════════════════════════════════════════
-#  8. NHÓM & GIAO VIỆC
+#  8. NHÓM & GIAO VIỆC — FIX: Schema phải được pass vào
 # ═══════════════════════════════════════════════════════════
 def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
     sub1, sub2 = st.tabs(["🏢 Tạo & Quản Lý Nhóm", "📋 Giao Việc Mới"])
@@ -728,7 +722,8 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
                     new_gid = f"G{(max(nums) + 1 if nums else 1):03d}"
                     m_ids   = ",".join([my_id] + sel_f)
                     if append_row_data(WS_GROUPS, [new_gid, grp_name, my_id, m_ids, grp_wh,
-                                                   NOW().strftime("%Y-%m-%d %H:%M:%S")]):
+                                                   NOW().strftime("%Y-%m-%d %H:%M:%S")],
+                                       GROUP_COLS):
                         if grp_wh:
                             push_to_discord(discord_group_created(grp_name), grp_wh)
                         st.success(msg_group_created(grp_name))
@@ -784,7 +779,6 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
     with sub2:
         st.subheader("📋 Giao Việc Mới")
 
-        # Danh sách người có thể giao: bản thân + bạn bè + thành viên nhóm mình dẫn
         assignable = {my_id: f"🙋 Tự mình ({get_user_name(my_id, users_df)})"}
         for f in my_friends:
             if f:
@@ -822,7 +816,7 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
                 row_data    = [new_tid, t_name.strip(), t_sub, t_assignee, dl_combined,
                                t_prio, "Chưa làm", "0", "", t_note, "", "",
                                NOW().strftime("%Y-%m-%d %H:%M:%S"), ""]
-                if append_row_data(WS_TASKS, row_data):
+                if append_row_data(WS_TASKS, row_data, TASK_COLS):
                     assignee_name = get_user_name(t_assignee, users_df)
                     st.success(msg_task_assigned(t_name, assignee_name))
                     wh_dm = get_user_dm_webhook(t_assignee, users_df)
@@ -879,7 +873,8 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends):
                         f_name = f_up.name if f_up else ""
                         m_type = "both" if (txt.strip() and f_up) else ("file" if f_up else "text")
                         append_row_data(WS_CHAT, [NOW().strftime("%Y-%m-%d %H:%M:%S"),
-                                                   my_id, sel_gid, txt.strip(), m_type, f_name, ""])
+                                                   my_id, sel_gid, txt.strip(), m_type, f_name, ""],
+                                        CHAT_COLS)
                         if also_discord and g_wh:
                             me_name  = get_user_name(my_id, users_df)
                             disc_msg = discord_group_chat(me_name, g_opts[sel_gid],
@@ -924,7 +919,8 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends):
                         f_name = f_up.name if f_up else ""
                         m_type = "both" if (txt.strip() and f_up) else ("file" if f_up else "text")
                         append_row_data(WS_DM, [NOW().strftime("%Y-%m-%d %H:%M:%S"),
-                                                my_id, sel_fid, txt.strip(), m_type, f_name, ""])
+                                                my_id, sel_fid, txt.strip(), m_type, f_name, ""],
+                                        DM_COLS)
                         if also_disc_dm and dm_wh:
                             me_name  = get_user_name(my_id, users_df)
                             disc_msg = discord_dm(me_name, txt.strip() or f"📎 Gửi file: {f_name}")
