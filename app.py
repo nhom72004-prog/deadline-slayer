@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/app.py << 'PYEOF'
 from datetime import datetime
 import pandas as pd
 import requests
