@@ -296,18 +296,45 @@ def get_ws(name):
 def append_row_data(name, row):
     import time
     ws = get_ws(name)
-    if ws:
+    if not ws:
+        st.error(f"❌ Không kết nối được sheet '{name}'! Kiểm tra credentials.")
+        return False
+    try:
+        # Ensure row length matches expected schema cols
+        schema_len = {
+            WS_TASKS: len(TASK_COLS), WS_USERS: len(USER_COLS),
+            WS_GROUPS: len(GROUP_COLS), WS_PROOFS: len(PROOF_COLS),
+            WS_CHAT: len(CHAT_COLS), WS_DM: len(DM_COLS),
+        }
+        expected = schema_len.get(name, len(row))
+        row = list(row) + [""] * max(0, expected - len(row))
+        row = row[:expected]
         ws.append_row(row, value_input_option="USER_ENTERED")
         time.sleep(0.5)
         fetch_all_data.clear()
+        return True
+    except Exception as e:
+        st.error(f"❌ Lỗi lưu dữ liệu vào '{name}': {e}")
+        return False
 
 def update_cell_by_id(ws_name, id_col, item_id, upd_col, new_val, schema):
     ws = get_ws(ws_name)
     if not ws: return
     try:
+        # Read actual header from sheet (may differ from schema due to old data)
+        actual_header = ws.row_values(1)
+        # Normalize header with alias
+        actual_header = [COLUMN_ALIAS.get(h, h) for h in actual_header]
+        # Find ID column index in actual sheet
+        if id_col not in actual_header:
+            st.error(f"💀 Không tìm thấy cột '{id_col}' trong sheet '{ws_name}'.")
+            return
+        id_col_idx = actual_header.index(id_col) + 1  # 1-based
+        upd_col_idx = actual_header.index(upd_col) + 1 if upd_col in actual_header else schema.index(upd_col) + 1
+        # Find the row with matching ID
         cell = ws.find(str(item_id))
-        if cell and cell.col == schema.index(id_col) + 1:
-            ws.update_cell(cell.row, schema.index(upd_col) + 1, new_val)
+        if cell and cell.col == id_col_idx:
+            ws.update_cell(cell.row, upd_col_idx, new_val)
             fetch_all_data.clear()
     except Exception as e:
         st.error(f"💀 Lỗi đồng bộ: {e}")
@@ -729,19 +756,20 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends_li
                             if i.startswith("T") and i[1:].isdigit()] if not tasks_df.empty else []
                     new_tid = f"T{(max(nums) + 1 if nums else 1):03d}"
                     fdl     = f"{dd} {dt.strftime('%H:%M:%S')}"
-                    append_row_data(WS_TASKS,
+                    ok = append_row_data(WS_TASKS,
                                     [new_tid, tn, sj, aid, fdl, pri,
                                      "Chưa xong", 0, "Bắt đầu", notes, 5, "",
                                      NOW().strftime("%Y-%m-%d %H:%M:%S"), ""])
-                    an       = get_user_name(aid, users_df)
-                    notified = set()
-                    for _, g in groups_df[groups_df["Thành_Viên_IDs"].str.contains(aid, na=False)].iterrows():
-                        wh = str(g.get("Discord_Webhook", "")).strip()
-                        if wh and wh not in notified:
-                            push_to_discord(discord_task_assigned(tn, an, fdl, pri), wh)
-                            notified.add(wh)
-                    st.success(msg_task_assigned(tn, an))
-                    st.rerun()
+                    if ok is not False:
+                        an       = get_user_name(aid, users_df)
+                        notified = set()
+                        for _, g in groups_df[groups_df["Thành_Viên_IDs"].str.contains(aid, na=False)].iterrows():
+                            wh = str(g.get("Discord_Webhook", "")).strip()
+                            if wh and wh not in notified:
+                                push_to_discord(discord_task_assigned(tn, an, fdl, pri), wh)
+                                notified.add(wh)
+                        st.success(msg_task_assigned(tn, an))
+                        st.rerun()
 
 # ═══════════════════════════════════════════════════════════
 #  9. CHAT
@@ -933,12 +961,16 @@ def render_friends_management(users_df, my_id, my_friends_list):
                     st.success(msg_friend_added(tu.iloc[0]["Tên"]))
                     st.rerun()
         st.markdown("---")
-        st.markdown("### 👥 Danh Sách Người Dùng")
-        st.caption("Tìm ID của ai đó để kết bạn")
-        disp = users_df[users_df["User_ID"] != my_id][["User_ID", "Tên", "Email"]].copy()
-        if not disp.empty:
-            disp.columns = ["ID", "Tên", "Email"]
-            st.dataframe(disp, use_container_width=True, hide_index=True)
+        st.markdown("### 🔎 Tìm Người Dùng")
+        st.caption("Nhập đúng User ID để kết bạn — thông tin tài khoản được bảo mật.")
+        search_id = st.text_input("Tra cứu User ID:", key="lookup_uid", placeholder="VD: U002").strip()
+        if search_id and search_id != my_id:
+            found = users_df[users_df["User_ID"] == search_id]
+            if not found.empty:
+                fname_found = found.iloc[0]["Tên"]
+                st.success(f"✅ Tìm thấy: **{fname_found}** (`{search_id}`)")
+            else:
+                st.warning("🔍 Không tìm thấy User ID này.")
     with c2:
         st.markdown("### 👥 Bạn Bè Của Tôi")
         if not my_friends_list:
@@ -999,7 +1031,11 @@ def render_account_tab(users_df, my_id):
     if users_df.empty:
         st.info("👻 Hệ thống trống!")
         return
-    st.dataframe(users_df[["User_ID", "Tên", "Email", "Ngày_Tạo"]], use_container_width=True)
+    # Hiển thị thông tin công khai — ẩn email & password
+    disp = users_df[["User_ID", "Tên", "Ngày_Tạo"]].copy()
+    disp.columns = ["User ID", "Tên", "Ngày Tạo"]
+    st.dataframe(disp, use_container_width=True, hide_index=True)
+    st.caption("🔒 Email và thông tin nhạy cảm được ẩn để bảo mật.")
     st.markdown("---")
     st.markdown("### 🗑️ Xóa Tài Khoản")
     st.warning("⚠️ Không thể xóa tài khoản đang đăng nhập.")
@@ -1007,7 +1043,8 @@ def render_account_tab(users_df, my_id):
     if others.empty:
         st.info("😎 Chỉ có mình bạn!")
         return
-    opts = {r["User_ID"]: f"{r['Tên']} ({r['User_ID']}) — {r['Email']}"
+    # Dropdown chỉ hiện tên + ID, không lộ email
+    opts = {r["User_ID"]: f"{r['Tên']} ({r['User_ID']})"
             for _, r in others.iterrows()}
     did = st.selectbox("Chọn tài khoản xóa:", list(opts.keys()), format_func=lambda x: opts[x])
     if st.checkbox(f"✅ Xác nhận xóa `{did}`"):
