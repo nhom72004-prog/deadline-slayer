@@ -36,7 +36,6 @@ html,body,[class*="css"]{font-family:'Space Grotesk',sans-serif;}
 .stButton>button[kind="primary"]{background:#5865F2;border:none;border-radius:8px;font-weight:700;color:white;}
 .stButton>button[kind="primary"]:hover{background:#404EED;}
 
-/* ── CHAT BUBBLES ── */
 .chat-wrap{display:flex;flex-direction:column;gap:8px;padding:6px 2px;}
 .msg-bubble{display:flex;align-items:flex-end;gap:8px;max-width:86%;}
 .msg-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;
@@ -45,35 +44,25 @@ html,body,[class*="css"]{font-family:'Space Grotesk',sans-serif;}
 .msg-meta{font-size:11px;padding:0 6px;}
 .msg-text{padding:9px 14px;border-radius:16px;font-size:14px;line-height:1.55;
     word-break:break-word;border:1px solid transparent;}
-
-/* file attachment bubble */
 .msg-file{display:inline-flex;align-items:center;gap:8px;margin-top:5px;
     padding:7px 12px;border-radius:10px;font-size:13px;text-decoration:none;
     border:1px solid;}
 .msg-file-icon{font-size:18px;flex-shrink:0;}
-
-/* other */
 .msg-other{align-self:flex-start;}
 .msg-other .msg-meta{color:#666;}
 .msg-other .msg-text{background:#f0f1f3;color:#1a1a1a;border-color:#e0e2e5;border-radius:4px 16px 16px 16px;}
 .msg-other .msg-avatar{background:#dde2ff;color:#3d47cc;}
 .msg-other .msg-file{background:#e8eaed;color:#333;border-color:#d0d3d8;}
-
-/* me */
 .msg-me{align-self:flex-end;flex-direction:row-reverse;}
 .msg-me .msg-meta{color:#aaa;text-align:right;}
 .msg-me .msg-text{background:#5865F2;color:#fff;border-color:#4752c4;border-radius:16px 4px 16px 16px;}
 .msg-me .msg-avatar{background:#5865F2;color:#fff;}
 .msg-me .msg-file{background:#4752c4;color:#fff;border-color:#3a41b0;}
-
-/* dm other */
 .msg-dm{align-self:flex-start;}
 .msg-dm .msg-meta{color:#666;}
 .msg-dm .msg-text{background:#f0f4ff;color:#1a1a1a;border-color:#c5d0ff;border-radius:4px 16px 16px 16px;}
 .msg-dm .msg-avatar{background:#c5d0ff;color:#2e3ab4;}
 .msg-dm .msg-file{background:#e0e8ff;color:#2e3ab4;border-color:#b0c0ff;}
-
-/* dark mode */
 @media(prefers-color-scheme:dark){
     .msg-other .msg-text{background:#2b2d31;color:#e8e9eb;border-color:#3f4147;}
     .msg-other .msg-avatar{background:#3d4270;color:#9ba4f5;}
@@ -85,14 +74,11 @@ html,body,[class*="css"]{font-family:'Space Grotesk',sans-serif;}
     .msg-dm .msg-file{background:#1e2340;color:#9ba8ff;border-color:#3b4680;}
     .msg-me .msg-meta{color:#aaa;}
 }
-
 .date-sep{text-align:center;font-size:11px;color:#aaa;margin:6px 0;
     display:flex;align-items:center;gap:8px;}
 .date-sep::before,.date-sep::after{content:'';flex:1;height:1px;background:currentColor;opacity:.3;}
-
 .chat-empty{text-align:center;padding:36px 20px;color:#999;font-size:14px;}
 .chat-empty-icon{font-size:34px;margin-bottom:8px;}
-
 .disc-badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;
     padding:3px 10px;border-radius:20px;font-weight:600;margin-bottom:4px;}
 .disc-on{background:#e8f5e9;color:#2e7d32;}
@@ -101,8 +87,6 @@ html,body,[class*="css"]{font-family:'Space Grotesk',sans-serif;}
     .disc-on{background:#1b3a1d;color:#81c784;}
     .disc-off{background:#2a2a2a;color:#777;}
 }
-
-/* friend card */
 .friend-card{display:flex;align-items:center;justify-content:space-between;
     padding:10px 14px;border-radius:10px;margin-bottom:6px;
     background:#f5f6f8;border:1px solid #e4e6ea;}
@@ -133,7 +117,6 @@ TASK_COLS  = ["ID","Tên_Công_Việc","Môn_Học","Người_Phụ_Trách_ID","
 USER_COLS  = ["User_ID","Password","Tên","Email","Bạn_Bè","Discord_Webhook_DM","Ngày_Tạo"]
 GROUP_COLS = ["Group_ID","Tên_Nhóm","Trưởng_Nhóm_ID","Thành_Viên_IDs","Discord_Webhook","Ngày_Tạo"]
 PROOF_COLS = ["Task_ID","Người_Nộp_ID","Thời_Gian","Mô_Tả","Giai_Đoạn","URL_File"]
-# Thêm cột Loại_Nội_Dung và File_URL để hỗ trợ file trong chat
 CHAT_COLS  = ["Thời_Gian","Người_Gửi_ID","Group_Nhận_ID","Nội_Dung","Loại","File_Tên","File_URL"]
 DM_COLS    = ["Thời_Gian","Người_Gửi_ID","Người_Nhận_ID","Nội_Dung","Loại","File_Tên","File_URL"]
 
@@ -199,6 +182,36 @@ def get_sheets_client():
         return gspread.authorize(creds)
     except: return None
 
+def migrate_chat_sheet(ws, expected_cols):
+    """Migrate old chat sheet that may have wrong column names."""
+    try:
+        current_header = ws.row_values(1)
+        if current_header == expected_cols:
+            return  # already correct
+        # Map old column names to new ones
+        col_map = {
+            "Thời_Gian": "Thời_Gian",
+            "Người_Gửi": "Người_Gửi_ID",   # old name → new name
+            "Người_Gửi_ID": "Người_Gửi_ID",
+            "Người_Nhận": "Người_Nhận_ID",
+            "Người_Nhận_ID": "Người_Nhận_ID",
+            "Group_Nhận_ID": "Group_Nhận_ID",
+            "Nội_Dung": "Nội_Dung",
+            "Loại": "Loại",
+            "File_Tên": "File_Tên",
+            "File_URL": "File_URL",
+        }
+        new_header = [col_map.get(c, c) for c in current_header]
+        # Write corrected header
+        ws.update("1:1", [new_header])
+        # Add any missing columns
+        for col in expected_cols:
+            if col not in new_header:
+                ws.update_cell(1, len(new_header)+1, col)
+                new_header.append(col)
+    except Exception as e:
+        pass  # silently ignore migration errors
+
 def init_spreadsheet_structure(ss):
     existing = [ws.title for ws in ss.worksheets()]
     for name, cols in {WS_TASKS:TASK_COLS,WS_USERS:USER_COLS,WS_GROUPS:GROUP_COLS,
@@ -206,6 +219,11 @@ def init_spreadsheet_structure(ss):
         if name not in existing:
             ws = ss.add_worksheet(title=name, rows=1000, cols=len(cols))
             ws.append_row(cols)
+        else:
+            # Migrate existing sheets if needed
+            if name in (WS_CHAT, WS_DM):
+                ws = ss.worksheet(name)
+                migrate_chat_sheet(ws, cols)
 
 @st.cache_data(ttl=1)
 def fetch_all_data():
@@ -220,9 +238,21 @@ def fetch_all_data():
         def get_df(name, cols):
             vals = ss.worksheet(name).get_all_values()
             if not vals or len(vals)<=1: return pd.DataFrame(columns=cols)
-            df = pd.DataFrame(vals[1:], columns=vals[0])
-            df = df.loc[:,~df.columns.duplicated()]
-            if "" in df.columns: df=df.drop(columns=[""])
+            header = vals[0]
+            rows   = vals[1:]
+            # Normalise header: map old names to canonical names
+            alias = {
+                "Người_Gửi":   "Người_Gửi_ID",
+                "Người_Nhận":  "Người_Nhận_ID",
+            }
+            header = [alias.get(h, h) for h in header]
+            df = pd.DataFrame(rows, columns=header)
+            df = df.loc[:, ~df.columns.duplicated()]
+            if "" in df.columns: df = df.drop(columns=[""])
+            # Add missing columns with empty string
+            for col in cols:
+                if col not in df.columns:
+                    df[col] = ""
             return df.reindex(columns=cols).fillna("")
         return {k:get_df(n,c) for k,n,c in [
             ("tasks",WS_TASKS,TASK_COLS),("users",WS_USERS,USER_COLS),
@@ -334,7 +364,6 @@ def get_initials(name):
     if len(p)>=2: return (p[0][0]+p[-1][0]).upper()
     return name[:2].upper() if len(name)>=2 else name.upper()
 
-# ─── File icon helper ─────────────────────────────────────
 def file_icon(fname):
     ext = fname.rsplit(".",1)[-1].lower() if "." in fname else ""
     return {"pdf":"📄","doc":"📝","docx":"📝","xls":"📊","xlsx":"📊",
@@ -342,24 +371,20 @@ def file_icon(fname):
             "png":"🖼","jpg":"🖼","jpeg":"🖼","gif":"🖼","mp4":"🎬",
             "mp3":"🎵","wav":"🎵"}.get(ext,"📎")
 
-# ─── Chat bubble renderer ─────────────────────────────────
 def render_bubble(sender_name, content, time_str, is_me, variant="group",
                   file_name="", file_url="", msg_type="text"):
     initials = get_initials(sender_name)
     cls = "msg-me" if is_me else ("msg-dm" if variant=="dm" else "msg-other")
     meta = time_str if is_me else f"{sender_name} · {time_str}"
-
     body = ""
     if msg_type in ("text","both") and content.strip():
         body += f'<div class="msg-text">{content}</div>'
-
     if msg_type in ("file","both") and file_name:
         icon = file_icon(file_name)
         if file_url and file_url.startswith("http"):
             body += f'<a class="msg-file" href="{file_url}" target="_blank" rel="noopener"><span class="msg-file-icon">{icon}</span>{file_name} <small style="opacity:.7;">↗ Mở</small></a>'
         else:
             body += f'<div class="msg-file"><span class="msg-file-icon">{icon}</span><span>{file_name}</span><small style="opacity:.6;margin-left:4px;">(chưa có link)</small></div>'
-
     return f"""
 <div class="msg-bubble {cls}">
   <div class="msg-avatar">{initials}</div>
@@ -431,12 +456,26 @@ def show_auth_page(data):
                         st.success(msg_register_success(new_id))
 
 # ═══════════════════════════════════════════════════════════
-#  6. MAIN APP
+#  6. MAIN APP  ← FIX: safe user lookup + session refresh
 # ═══════════════════════════════════════════════════════════
 def main_app(data):
     users_df=data["users"]; groups_df=data["groups"]; tasks_df=data["tasks"]
     cu=st.session_state["current_user"]; my_id=cu["User_ID"]
+
+    # ── FIX: refresh current_user from sheet; handle stale session ──
+    fresh_user = users_df[users_df["User_ID"]==my_id]
+    if fresh_user.empty:
+        st.warning("⚠️ Phiên đăng nhập hết hạn hoặc tài khoản không còn tồn tại. Vui lòng đăng nhập lại.")
+        st.session_state.update({"logged_in":False,"current_user":None})
+        st.rerun()
+        return
+    # Keep session_state in sync with latest sheet data
+    cu = fresh_user.iloc[0].to_dict()
+    st.session_state["current_user"] = cu
+
     is_leader=not groups_df[groups_df["Trưởng_Nhóm_ID"]==my_id].empty
+    me = fresh_user.iloc[0]
+    my_friends=[f.strip() for f in str(me["Bạn_Bè"]).split(",") if f.strip()]
 
     with st.sidebar:
         st.markdown("## ⚔️ DEADLINE SLAYER")
@@ -451,8 +490,7 @@ def main_app(data):
             st.session_state["sheet_name"]=sn; fetch_all_data.clear(); st.rerun()
         st.markdown("---")
         st.markdown("### 🔔 Webhook Cá Nhân")
-        my_row=users_df[users_df["User_ID"]==my_id]
-        cur_wh=str(my_row.iloc[0].get("Discord_Webhook_DM","")).strip() if not my_row.empty else ""
+        cur_wh=str(me.get("Discord_Webhook_DM","")).strip()
         new_wh=st.text_input("Webhook nhận DM:",value=cur_wh,placeholder="https://discord.com/api/webhooks/...",key="sidebar_wh").strip()
         if st.button("💾 Lưu Webhook",use_container_width=True):
             update_cell_by_id(WS_USERS,"User_ID",my_id,"Discord_Webhook_DM",new_wh,USER_COLS)
@@ -473,9 +511,6 @@ def main_app(data):
         st.markdown("---")
         if st.button("🔄 Làm mới",use_container_width=True):
             fetch_all_data.clear(); st.rerun()
-
-    me=users_df[users_df["User_ID"]==my_id].iloc[0]
-    my_friends=[f.strip() for f in str(me["Bạn_Bè"]).split(",") if f.strip()]
 
     t1,t2,t3,t4,t5,t6=st.tabs([
         "📊 Dashboard","👥 Nhóm & Giao Việc","💬 Chat",
@@ -503,7 +538,7 @@ def render_dashboard(tasks_df,groups_df,users_df,my_id,is_leader):
     vt["Tiến_Độ_%"]=vt["Tiến_Độ_%"].apply(clean_progress)
     vt["_st"]=vt.apply(calc_status,axis=1)
     vt["_rem"]=vt.apply(fmt_remaining,axis=1)
-    slabels={"done":"✅ XONG","overdue":"💀 QUÁ HẠN","urgent":"🔥 KHẨN","warning":"⚠️ SẮP ĐẾN","safe":"😎 CÒN TH余裕","unknown":"❓"}
+    slabels={"done":"✅ XONG","overdue":"💀 QUÁ HẠN","urgent":"🔥 KHẨN","warning":"⚠️ SẮP ĐẾN","safe":"😎 CÒN THỜI GIAN","unknown":"❓"}
     for _,row in vt.iterrows():
         bc={"done":"#2e7d32","overdue":"#d32f2f","urgent":"#f57c00","warning":"#fbc02d","safe":"#1976d2"}.get(row["_st"],"#ccc")
         an=get_user_name(row["Người_Phụ_Trách_ID"],users_df)
@@ -539,7 +574,7 @@ def render_dashboard(tasks_df,groups_df,users_df,my_id,is_leader):
                         else: st.error("🙈 Chọn file trước đã!")
 
 # ═══════════════════════════════════════════════════════════
-#  8. NHÓM & GIAO VIỆC (gộp tab 2+3 cũ)
+#  8. NHÓM & GIAO VIỆC
 # ═══════════════════════════════════════════════════════════
 def render_network_and_tasks(users_df,groups_df,tasks_df,my_id,my_friends_list):
     sub1,sub2=st.tabs(["🏢 Tạo & Quản Lý Nhóm","📋 Giao Việc Mới"])
@@ -629,13 +664,12 @@ def render_network_and_tasks(users_df,groups_df,tasks_df,my_id,my_friends_list):
                     st.success(msg_task_assigned(tn,an)); st.rerun()
 
 # ═══════════════════════════════════════════════════════════
-#  9. CHAT — tách Web & Discord + file hiện trên web
+#  9. CHAT
 # ═══════════════════════════════════════════════════════════
 def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
     st.subheader("💬 Chat")
     sg,sdm=st.tabs(["🏢 Chat Nhóm","🔒 Tin Nhắn Riêng (DM)"])
 
-    # ── CHAT NHÓM ─────────────────────────────────────────
     with sg:
         mjg=groups_df[groups_df["Thành_Viên_IDs"].str.contains(my_id,na=False)]
         if mjg.empty:
@@ -646,9 +680,13 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
             wh_grp=get_group_webhook(sgid,groups_df)
             sname=get_user_name(my_id,users_df); glabel=go[sgid]
 
-            # Vùng hiển thị tin nhắn
             with st.container(height=400):
-                gc=chat_df[chat_df["Group_Nhận_ID"]==sgid] if not chat_df.empty else pd.DataFrame(columns=CHAT_COLS)
+                # ── FIX: filter properly, handle missing Group_Nhận_ID col ──
+                if not chat_df.empty and "Group_Nhận_ID" in chat_df.columns:
+                    gc=chat_df[chat_df["Group_Nhận_ID"]==sgid].copy()
+                else:
+                    gc=pd.DataFrame(columns=CHAT_COLS)
+
                 if gc.empty:
                     st.markdown('<div class="chat-empty"><div class="chat-empty-icon">💬</div>Chưa có tin nhắn nào! Phá băng đi nào~</div>',unsafe_allow_html=True)
                 else:
@@ -657,54 +695,31 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
             st.markdown("---")
             cw,cd=st.columns(2,gap="medium")
 
-            # ── Gửi lên Web ───────────────────────────────
             with cw:
                 st.markdown("#### 🌐 Gửi lên Web")
-                st.caption("Lưu tin & file lên chat nhóm trên web. Có thể chọn đồng thời gửi Discord.")
+                st.caption("Lưu tin & file lên chat nhóm trên web.")
                 with st.form("grp_web_form",clear_on_submit=True):
                     mw=st.text_area("Nội dung:",placeholder="Nhắn gì đó...",height=80,key="gwm")
-                    fw=st.file_uploader("📎 File đính kèm (hiển thị trên web + tải link)",key="gwf")
+                    fw=st.file_uploader("📎 File đính kèm",key="gwf")
                     also_disc=st.checkbox("📡 Đồng thời gửi lên Discord nhóm",value=bool(wh_grp),key="gwd_also")
                     sw=st.form_submit_button("📩 Gửi lên Web",use_container_width=True)
                     if sw:
                         if not mw.strip() and not fw:
                             st.warning("💭 Nhắn gì hoặc đính file đi~")
                         else:
-                            # Xác định loại
-                            if mw.strip() and fw: mtype="both"
-                            elif fw: mtype="file"
-                            else: mtype="text"
-
-                            # Tạo link download từ file (base64 data URL)
-                            file_url=""
-                            if fw:
-                                import base64
-                                b64=base64.b64encode(fw.getvalue()).decode()
-                                ext=fw.name.rsplit(".",1)[-1].lower() if "." in fw.name else "bin"
-                                mime_map={"pdf":"application/pdf","png":"image/png","jpg":"image/jpeg",
-                                          "jpeg":"image/jpeg","gif":"image/gif","mp4":"video/mp4",
-                                          "mp3":"audio/mpeg","docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                          "xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                          "zip":"application/zip"}
-                                mime=mime_map.get(ext,"application/octet-stream")
-                                file_url=f"data:{mime};base64,{b64}"
-
+                            mtype="both" if (mw.strip() and fw) else ("file" if fw else "text")
                             append_row_data(WS_CHAT,[
                                 NOW().strftime("%Y-%m-%d %H:%M:%S"),
-                                my_id,sgid,mw.strip(),mtype,
-                                fw.name if fw else "","" # file_url quá dài, dùng data url chỉ client-side
+                                my_id, sgid, mw.strip(), mtype,
+                                fw.name if fw else "", ""
                             ])
-
-                            # Gửi Discord nếu tick
                             if also_disc and wh_grp:
                                 dm=discord_group_chat(sname,glabel,mw.strip()) if mw.strip() else f"📎 **{sname}** gửi file vào **{glabel}**!"
                                 if fw: push_to_discord(dm,wh_grp,fw.getvalue(),fw.name)
                                 else: push_to_discord(dm,wh_grp)
-
-                            st.toast("✅ Đã gửi lên web!" + (" + Discord!" if also_disc and wh_grp else ""))
+                            st.toast("✅ Đã gửi!" + (" + Discord!" if also_disc and wh_grp else ""))
                             st.rerun()
 
-            # ── Gửi lên Discord ───────────────────────────
             with cd:
                 st.markdown("#### 🎮 Gửi lên Discord")
                 if wh_grp:
@@ -713,7 +728,7 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
                     st.markdown('<span class="disc-badge disc-off">⚫ Bot chưa cấu hình</span>',unsafe_allow_html=True)
                 with st.form("grp_disc_form",clear_on_submit=True):
                     md=st.text_area("Nội dung Discord:",placeholder="Gửi thẳng lên Discord, không lưu web...",height=68,key="gdm")
-                    fd=st.file_uploader("📎 File đính kèm Discord (tối đa 25MB)",key="gdf")
+                    fd=st.file_uploader("📎 File đính kèm Discord",key="gdf")
                     sd=st.form_submit_button("🚀 Gửi lên Discord",use_container_width=True,disabled=not wh_grp)
                     if sd:
                         if not md.strip() and not fd: st.warning("💭 Nhắn gì hoặc đính file~")
@@ -723,7 +738,6 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
                             ok=push_to_discord(dm,wh_grp,fd.getvalue(),fd.name) if fd else push_to_discord(dm,wh_grp)
                             st.toast("🚀 Đã bắn!" if ok else "😥 Thất bại!")
 
-    # ── DM ────────────────────────────────────────────────
     with sdm:
         if not my_friends_list:
             st.warning("👀 Chưa có bạn bè! Qua tab 'Quản Lý Bạn Bè' kết bạn đi~")
@@ -735,10 +749,14 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
             sname=get_user_name(my_id,users_df)
 
             with st.container(height=400):
-                convo=dm_df[
-                    ((dm_df["Người_Gửi_ID"]==my_id)&(dm_df["Người_Nhận_ID"]==sf))|
-                    ((dm_df["Người_Gửi_ID"]==sf)&(dm_df["Người_Nhận_ID"]==my_id))
-                ].copy() if not dm_df.empty else pd.DataFrame(columns=DM_COLS)
+                if not dm_df.empty and "Người_Gửi_ID" in dm_df.columns and "Người_Nhận_ID" in dm_df.columns:
+                    convo=dm_df[
+                        ((dm_df["Người_Gửi_ID"]==my_id)&(dm_df["Người_Nhận_ID"]==sf))|
+                        ((dm_df["Người_Gửi_ID"]==sf)&(dm_df["Người_Nhận_ID"]==my_id))
+                    ].copy()
+                else:
+                    convo=pd.DataFrame(columns=DM_COLS)
+
                 if convo.empty:
                     st.markdown(f'<div class="chat-empty"><div class="chat-empty-icon">🌸</div>Chưa có tin nhắn với {fn}.<br>Bắt đầu trò chuyện đi nào~</div>',unsafe_allow_html=True)
                 else:
@@ -761,8 +779,8 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
                             mtype="both" if (dmw.strip() and dfw) else ("file" if dfw else "text")
                             append_row_data(WS_DM,[
                                 NOW().strftime("%Y-%m-%d %H:%M:%S"),
-                                my_id,sf,dmw.strip(),mtype,
-                                dfw.name if dfw else "",""])
+                                my_id, sf, dmw.strip(), mtype,
+                                dfw.name if dfw else "", ""])
                             if also_disc_dm and rwh:
                                 dm2=discord_dm(sname,dmw.strip()) if dmw.strip() else f"📎 **{sname}** gửi cho bạn một file~"
                                 if dfw: push_to_discord(dm2,rwh,dfw.getvalue(),dfw.name)
@@ -776,7 +794,7 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
                 else: st.markdown(f'<span class="disc-badge disc-off">⚫ {fn} chưa cài Webhook</span>',unsafe_allow_html=True)
                 with st.form("dm_disc_form",clear_on_submit=True):
                     dmd=st.text_area("Nội dung Discord:",placeholder="Chỉ gửi Discord, không lưu web...",height=68,key="ddm")
-                    dfd=st.file_uploader("📎 File (tối đa 25MB)",key="ddf")
+                    dfd=st.file_uploader("📎 File",key="ddf")
                     sdd=st.form_submit_button("🚀 Gửi lên Discord",use_container_width=True,disabled=not rwh)
                     if sdd:
                         if not dmd.strip() and not dfd: st.warning("💭 Nhắn gì hoặc đính file~")
@@ -787,12 +805,11 @@ def render_chat(chat_df,dm_df,groups_df,users_df,my_id,my_friends_list):
                             st.toast(f"🚀 Đã ping Discord của {fn}!" if ok else "😥 Thất bại!")
 
 # ═══════════════════════════════════════════════════════════
-#  10. QUẢN LÝ BẠN BÈ (tab mới thay thế Quản lý Tài Khoản)
+#  10. QUẢN LÝ BẠN BÈ
 # ═══════════════════════════════════════════════════════════
 def render_friends_management(users_df, my_id, my_friends_list):
     st.subheader("👫 Quản Lý Bạn Bè")
     c1,c2=st.columns([1,1],gap="large")
-
     with c1:
         st.markdown("### 🔍 Tìm & Kết Bạn")
         sid=st.text_input("Nhập User ID muốn kết bạn:").strip()
@@ -806,7 +823,6 @@ def render_friends_management(users_df, my_id, my_friends_list):
                     nf=my_friends_list+[sid]
                     update_cell_by_id(WS_USERS,"User_ID",my_id,"Bạn_Bè",",".join(nf),USER_COLS)
                     st.success(msg_friend_added(tu.iloc[0]["Tên"])); st.rerun()
-
         st.markdown("---")
         st.markdown("### 👥 Danh Sách Người Dùng")
         st.caption("Tìm ID của ai đó để kết bạn")
@@ -814,11 +830,10 @@ def render_friends_management(users_df, my_id, my_friends_list):
         if not disp.empty:
             disp.columns=["ID","Tên","Email"]
             st.dataframe(disp,use_container_width=True,hide_index=True)
-
     with c2:
         st.markdown("### 👥 Bạn Bè Của Tôi")
         if not my_friends_list:
-            st.markdown('<div class="chat-empty"><div class="chat-empty-icon">🦗</div>Chưa có bạn nào...<br>Kết bạn thêm đi! Deadline một mình buồn lắm~</div>',unsafe_allow_html=True)
+            st.markdown('<div class="chat-empty"><div class="chat-empty-icon">🦗</div>Chưa có bạn nào...<br>Kết bạn thêm đi!</div>',unsafe_allow_html=True)
         else:
             st.caption(f"Bạn có **{len(my_friends_list)}** người bạn")
             for fid in my_friends_list:
@@ -859,7 +874,7 @@ def render_leaderboard(tasks_df,users_df):
     st.dataframe(g,use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════
-#  12. TÀI KHOẢN (giữ lại đơn giản)
+#  12. TÀI KHOẢN
 # ═══════════════════════════════════════════════════════════
 def render_account_tab(users_df,my_id):
     st.subheader("🗑️ Quản Lý Tài Khoản Hệ Thống")
