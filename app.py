@@ -8,6 +8,7 @@ import json
 import os
 import random
 import streamlit as st
+import time
 
 if not os.path.exists("credentials.json"):
     if "gcp_service_account" in st.secrets:
@@ -24,6 +25,33 @@ st.set_page_config(page_title="Deadline Slayer ⚔️", page_icon="⚔️",
 for k, v in [("sheet_name", "DeadlineSlayer_DB"), ("logged_in", False), ("current_user", None)]:
     if k not in st.session_state:
         st.session_state[k] = v
+
+# ═══════════════════════════════════════════════════════════
+#  CUSTOM CACHE - FIX RATE LIMIT
+# ═══════════════════════════════════════════════════════════
+_cache_data = None
+_cache_time = None
+CACHE_TTL = 60  # Cache 60 giây
+
+def get_cached_data():
+    """Lấy dữ liệu với cache - tránh Rate Limit"""
+    global _cache_data, _cache_time
+    
+    now = time.time()
+    if _cache_data is not None and _cache_time is not None:
+        if now - _cache_time < CACHE_TTL:
+            return _cache_data
+    
+    # Dữ liệu hết hạn, fetch lại
+    _cache_data = fetch_all_data_real()
+    _cache_time = now
+    return _cache_data
+
+def clear_cache():
+    """Xoá cache"""
+    global _cache_data, _cache_time
+    _cache_data = None
+    _cache_time = None
 
 st.markdown("""
 <style>
@@ -188,14 +216,15 @@ def discord_dm(sender, content): return f"📩 **Tin nhắn riêng từ {sender}
 def discord_group_chat(sender, group, content): return f"💬 **{sender}** › [{group}]:\n{content}"
 
 # ═══════════════════════════════════════════════════════════
-#  3. GOOGLE SHEETS — FIX MAJOR
+#  3. GOOGLE SHEETS — FIX RATE LIMIT
 # ═══════════════════════════════════════════════════════════
 @st.cache_resource(ttl=300)
 def get_sheets_client():
     try:
         creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", SCOPES)
         return gspread.authorize(creds)
-    except:
+    except Exception as e:
+        st.error(f"❌ Lỗi Google Sheets Client: {e}")
         return None
 
 def migrate_sheet(ws, expected_cols):
@@ -226,8 +255,8 @@ def init_spreadsheet_structure(ss):
         else:
             migrate_sheet(existing[name], cols)
 
-@st.cache_data(ttl=30)
-def fetch_all_data():
+def fetch_all_data_real():
+    """Fetch THỰC sự từ Google Sheets - chỉ gọi khi cần"""
     client = get_sheets_client()
     empty = {
         "tasks":  pd.DataFrame(columns=TASK_COLS),
@@ -272,6 +301,10 @@ def fetch_all_data():
         st.error(f"❌ Lỗi kết nối Google Sheets: {e}")
         return empty
 
+# THAY THẾ fetch_all_data() - dùng cache custom
+def fetch_all_data():
+    return get_cached_data()
+
 def get_ws(name):
     c = get_sheets_client()
     if not c:
@@ -282,21 +315,19 @@ def get_ws(name):
         return None
 
 def append_row_data(name, row, schema):
-    """FIX: Chắc chắn row data luôn có đủ cột theo schema"""
-    import time
+    """Thêm dòng mới"""
     ws = get_ws(name)
     if not ws:
         st.error(f"❌ Không kết nối được sheet '{name}'! Kiểm tra credentials.")
         return False
     try:
-        # Pad row to match schema length
         expected_len = len(schema)
         row = list(row) + [""] * max(0, expected_len - len(row))
         row = row[:expected_len]
         
         ws.append_row(row, value_input_option="USER_ENTERED")
-        time.sleep(0.3)
-        fetch_all_data.clear()
+        time.sleep(0.5)  # Chờ Google xử lý
+        clear_cache()  # XOÁ CACHE để fetch lại lần tới
         return True
     except Exception as e:
         st.error(f"❌ Lỗi lưu dữ liệu vào '{name}': {e}")
@@ -317,7 +348,8 @@ def update_cell_by_id(ws_name, id_col, item_id, upd_col, new_val, schema):
         cell = ws.find(str(item_id))
         if cell and cell.col == id_col_idx:
             ws.update_cell(cell.row, upd_col_idx, new_val)
-            fetch_all_data.clear()
+            time.sleep(0.3)
+            clear_cache()  # XOÁ CACHE
     except Exception as e:
         st.error(f"💀 Lỗi đồng bộ: {e}")
 
@@ -329,7 +361,8 @@ def delete_row_by_id(ws_name, id_col, item_id, schema):
         cell = ws.find(str(item_id))
         if cell and cell.col == schema.index(id_col) + 1:
             ws.delete_rows(cell.row)
-            fetch_all_data.clear()
+            time.sleep(0.3)
+            clear_cache()  # XOÁ CACHE
             return True
         return False
     except Exception as e:
@@ -570,7 +603,7 @@ def main_app(data):
         sn = st.text_input("Tên Google Sheets", value=st.session_state["sheet_name"], key="sidebar_sheet_name")
         if sn != st.session_state["sheet_name"]:
             st.session_state["sheet_name"] = sn
-            fetch_all_data.clear()
+            clear_cache()
             st.rerun()
         st.markdown("---")
         st.markdown("### 🔔 Webhook Cá Nhân")
@@ -586,17 +619,20 @@ def main_app(data):
             st.markdown("### 🤖 Bot Nhóm")
             mg = groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id]
             go = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in mg.iterrows()}
-            sg = st.selectbox("Chọn nhóm:", list(go.keys()), format_func=lambda x: go[x], key="sidebar_grp_sel")
-            mt = st.text_area("Nội dung thông báo:", key="sidebar_broadcast_txt")
-            af = st.file_uploader("📎 Đính kèm file", key="sidebar_broadcast_file")
-            if st.button("🚀 Bắn Lên Discord", use_container_width=True, type="primary", key="sidebar_discord_blast"):
-                wh  = get_group_webhook(sg, groups_df)
-                msg = msg_discord_broadcast(cu["Tên"]) + mt
-                ok  = push_to_discord(msg, wh, af.getvalue(), af.name) if af else push_to_discord(msg, wh)
-                st.toast("🚀 Đã bắn!" if ok else "😥 Thất bại!")
+            if not go:
+                st.info("Chưa có nhóm nào để quản lý")
+            else:
+                sg = st.selectbox("Chọn nhóm:", list(go.keys()), format_func=lambda x: go[x], key="sidebar_grp_sel")
+                mt = st.text_area("Nội dung thông báo:", key="sidebar_broadcast_txt")
+                af = st.file_uploader("📎 Đính kèm file", key="sidebar_broadcast_file")
+                if st.button("🚀 Bắn Lên Discord", use_container_width=True, type="primary", key="sidebar_discord_blast"):
+                    wh  = get_group_webhook(sg, groups_df)
+                    msg = msg_discord_broadcast(cu["Tên"]) + mt
+                    ok  = push_to_discord(msg, wh, af.getvalue(), af.name) if af else push_to_discord(msg, wh)
+                    st.toast("🚀 Đã bắn!" if ok else "😥 Thất bại!")
         st.markdown("---")
         if st.button("🔄 Làm mới dữ liệu", use_container_width=True, key="sidebar_refresh"):
-            fetch_all_data.clear()
+            clear_cache()
             st.rerun()
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -696,7 +732,7 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
                             st.error("🙈 Chọn file trước đã!")
 
 # ═══════════════════════════════════════════════════════════
-#  8. NHÓM & GIAO VIỆC — FIX: Schema phải được pass vào
+#  8. NHÓM & GIAO VIỆC
 # ═══════════════════════════════════════════════════════════
 def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
     sub1, sub2 = st.tabs(["🏢 Tạo & Quản Lý Nhóm", "📋 Giao Việc Mới"])
