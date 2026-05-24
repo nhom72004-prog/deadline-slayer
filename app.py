@@ -1,4 +1,3 @@
-from datetime import datetime
 import pandas as pd
 import requests
 import gspread
@@ -9,7 +8,6 @@ import os
 import random
 import streamlit as st
 
-# ── Ghi credentials ra file nếu chạy trên Streamlit Cloud ──
 if not os.path.exists("credentials.json"):
     if "gcp_service_account" in st.secrets:
         with open("credentials.json", "w") as f:
@@ -22,7 +20,6 @@ def NOW():
 st.set_page_config(page_title="Deadline Slayer ⚔️", page_icon="⚔️",
                    layout="wide", initial_sidebar_state="expanded")
 
-# ── Session state defaults ──
 for k, v in [("sheet_name", "DeadlineSlayer_DB"), ("logged_in", False), ("current_user", None)]:
     if k not in st.session_state:
         st.session_state[k] = v
@@ -191,10 +188,8 @@ def discord_group_chat(sender, group, content): return f"💬 **{sender}** › [
 
 # ═══════════════════════════════════════════════════════════
 #  3. GOOGLE SHEETS
-#  FIX: ttl=300 cho client (5 phút), ttl=30 cho data (30 giây)
-#       Giảm ~120x số lần gọi API so với ttl=1
 # ═══════════════════════════════════════════════════════════
-@st.cache_resource(ttl=300)          # FIX #3: tăng từ 15 → 300 giây
+@st.cache_resource(ttl=300)
 def get_sheets_client():
     try:
         creds = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", SCOPES)
@@ -230,7 +225,7 @@ def init_spreadsheet_structure(ss):
         else:
             migrate_sheet(existing[name], cols)
 
-@st.cache_data(ttl=30)               # FIX #1: tăng từ 1 → 30 giây
+@st.cache_data(ttl=30)
 def fetch_all_data():
     client = get_sheets_client()
     empty = {
@@ -302,7 +297,7 @@ def append_row_data(name, row):
         row = row[:expected]
         ws.append_row(row, value_input_option="USER_ENTERED")
         time.sleep(0.3)
-        fetch_all_data.clear()       # FIX #2: clear() chỉ sau khi write thành công
+        fetch_all_data.clear()
         return True
     except Exception as e:
         st.error(f"❌ Lỗi lưu dữ liệu vào '{name}': {e}")
@@ -323,7 +318,7 @@ def update_cell_by_id(ws_name, id_col, item_id, upd_col, new_val, schema):
         cell = ws.find(str(item_id))
         if cell and cell.col == id_col_idx:
             ws.update_cell(cell.row, upd_col_idx, new_val)
-            fetch_all_data.clear()   # FIX #2: clear() chỉ sau khi write thành công
+            fetch_all_data.clear()
     except Exception as e:
         st.error(f"💀 Lỗi đồng bộ: {e}")
 
@@ -335,7 +330,7 @@ def delete_row_by_id(ws_name, id_col, item_id, schema):
         cell = ws.find(str(item_id))
         if cell and cell.col == schema.index(id_col) + 1:
             ws.delete_rows(cell.row)
-            fetch_all_data.clear()   # FIX #2: clear() chỉ sau khi write thành công
+            fetch_all_data.clear()
             return True
         return False
     except Exception as e:
@@ -498,7 +493,6 @@ def show_auth_page():
                 if not log_id or not log_pass:
                     st.error("🙏 Vui lòng nhập đủ User ID và mật khẩu!")
                 else:
-                    # FIX #2: không clear() trước khi đọc — dùng cache hiện có
                     fu = fetch_all_data()["users"]
                     if fu.empty:
                         st.error("👻 Chưa có tài khoản nào! Hãy đăng ký trước.")
@@ -526,7 +520,6 @@ def show_auth_page():
                 if not rn or not re or not rp:
                     st.error("🙏 Điền đủ Tên, Email và Mật khẩu nhé!")
                 else:
-                    # FIX #2: đọc cache hiện có, không clear() trước
                     fu = fetch_all_data()["users"]
                     if not fu.empty and re in fu["Email"].astype(str).str.strip().values:
                         st.error("📧 Email này đã được đăng ký!")
@@ -538,7 +531,6 @@ def show_auth_page():
                                              [new_id, rp, rn, re, "", rw,
                                               NOW().strftime("%Y-%m-%d %H:%M:%S")])
                         if ok:
-                            # append_row_data đã clear() cache bên trong
                             st.success(msg_register_success(new_id))
                         else:
                             st.error("❌ Không lưu được tài khoản. Kiểm tra kết nối Sheets!")
@@ -588,7 +580,6 @@ def main_app(data):
                                key="sidebar_wh").strip()
         if st.button("💾 Lưu Webhook", use_container_width=True, key="sidebar_save_wh"):
             update_cell_by_id(WS_USERS, "User_ID", my_id, "Discord_Webhook_DM", new_wh, USER_COLS)
-            # update_cell_by_id đã clear() cache bên trong
             st.toast(msg_webhook_saved())
         if is_leader:
             st.markdown("---")
@@ -620,20 +611,33 @@ def main_app(data):
     with tab6: render_account_tab(users_df, my_id)
 
 # ═══════════════════════════════════════════════════════════
-#  7. DASHBOARD
+#  7. DASHBOARD — FIX: hiện task của tất cả thành viên
+#     cùng nhóm, không chỉ nhóm mình làm trưởng
 # ═══════════════════════════════════════════════════════════
 def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
     st.subheader("📊 Bảng Tiến Độ")
 
-    my_groups = groups_df[groups_df["Trưởng_Nhóm_ID"] == my_id]
-    subs = []
-    for _, g in my_groups.iterrows():
-        subs.extend([m.strip() for m in str(g["Thành_Viên_IDs"]).split(",") if m.strip()])
+    # Lấy tất cả nhóm mình tham gia (cả TV lẫn trưởng nhóm)
+    my_groups = groups_df[
+        groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False) |
+        (groups_df["Trưởng_Nhóm_ID"] == my_id)
+    ]
 
-    vt = tasks_df[
-        (tasks_df["Người_Phụ_Trách_ID"] == my_id) |
-        (tasks_df["Người_Phụ_Trách_ID"].isin(subs))
-    ].copy()
+    # Gom tất cả thành viên trong các nhóm mình thuộc về
+    all_group_members = set()
+    for _, g in my_groups.iterrows():
+        for m in str(g["Thành_Viên_IDs"]).split(","):
+            if m.strip():
+                all_group_members.add(m.strip())
+
+    # Hiện task: của mình + của mọi người trong cùng nhóm
+    if all_group_members:
+        vt = tasks_df[
+            (tasks_df["Người_Phụ_Trách_ID"] == my_id) |
+            (tasks_df["Người_Phụ_Trách_ID"].isin(all_group_members))
+        ].copy()
+    else:
+        vt = tasks_df[tasks_df["Người_Phụ_Trách_ID"] == my_id].copy()
 
     if vt.empty:
         st.info("🎉 Chưa có nhiệm vụ nào — tận hưởng khoảnh khắc này đi!")
@@ -665,6 +669,7 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
     </div>
 </div>""", unsafe_allow_html=True)
 
+        # Chỉ cho cập nhật task được giao cho chính mình
         if row["Người_Phụ_Trách_ID"] == my_id:
             with st.expander(f"🛠 Cập nhật: {row['Tên_Công_Việc']}"):
                 c1, c2 = st.columns(2)
@@ -676,7 +681,6 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id, is_leader):
                         if np_ == 100:
                             update_cell_by_id(WS_TASKS, "ID", row["ID"], "Trạng_Thái", "Đã xong", TASK_COLS)
                         st.success(msg_progress_saved(np_))
-                        # FIX #2: không gọi fetch_all_data.clear() thêm — update_cell_by_id đã clear()
                         st.rerun()
                 with c2:
                     st.markdown("**📤 Nộp minh chứng lên Discord**")
@@ -717,7 +721,6 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
                 if not grp_name:
                     st.error("🙏 Vui lòng nhập tên nhóm!")
                 else:
-                    # FIX #2: đọc cache hiện có, không clear() trước
                     fg = fetch_all_data()["groups"]
                     nums = [int(i[1:]) for i in fg["Group_ID"].dropna().astype(str).tolist()
                             if i.startswith("G") and i[1:].isdigit()] if not fg.empty else []
@@ -780,6 +783,7 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
     with sub2:
         st.subheader("📋 Giao Việc Mới")
 
+        # Danh sách người có thể giao: bản thân + bạn bè + thành viên nhóm mình dẫn
         assignable = {my_id: f"🙋 Tự mình ({get_user_name(my_id, users_df)})"}
         for f in my_friends:
             if f:
@@ -809,7 +813,6 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
             if not t_name.strip():
                 st.error("🙏 Vui lòng nhập tên công việc!")
             else:
-                # FIX #2: đọc cache hiện có, không clear() trước
                 ft   = fetch_all_data()["tasks"]
                 nums = [int(i[1:]) for i in ft["ID"].dropna().astype(str).tolist()
                         if i.startswith("T") and i[1:].isdigit()] if not ft.empty else []
@@ -830,7 +833,6 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
                         if wh and wh not in notified:
                             push_to_discord(discord_task_assigned(t_name, assignee_name, dl_combined, t_prio), wh)
                             notified.add(wh)
-                    # append_row_data đã clear() cache — chỉ cần rerun()
                     st.rerun()
                 else:
                     st.error("💀 Lỗi lưu vào Google Sheets!")
@@ -955,7 +957,6 @@ def render_friends_management(users_df, my_id, my_friends):
                     updated_friends = my_friends + [f_id_add]
                     update_cell_by_id(WS_USERS, "User_ID", my_id, "Bạn_Bè",
                                       ",".join(updated_friends), USER_COLS)
-                    # update_cell_by_id đã clear() cache
                     st.success(msg_friend_added(f_name_matched))
                     st.rerun()
 
@@ -986,7 +987,6 @@ def render_friends_management(users_df, my_id, my_friends):
                 if st.button(f"❌ Xóa {fname}", key=f"del_f_{fid}", use_container_width=True):
                     updated = [f for f in valid_friends if f != fid]
                     update_cell_by_id(WS_USERS, "User_ID", my_id, "Bạn_Bè", ",".join(updated), USER_COLS)
-                    # update_cell_by_id đã clear() cache
                     st.success(msg_friend_removed(fname))
                     st.rerun()
 
@@ -1047,7 +1047,6 @@ def render_account_tab(users_df, my_id):
         else:
             update_cell_by_id(WS_USERS, "User_ID", my_id, "Tên",     new_name.strip(), USER_COLS)
             update_cell_by_id(WS_USERS, "User_ID", my_id, "Password", new_pass.strip(), USER_COLS)
-            # update_cell_by_id đã clear() cache
             st.success("🎉 Đã cập nhật hồ sơ thành công!")
             st.rerun()
 
@@ -1064,7 +1063,6 @@ def render_account_tab(users_df, my_id):
             if st.button("💥 Xóa Tài Khoản", type="primary", key="btn_delete_account"):
                 if delete_row_by_id(WS_USERS, "User_ID", did, USER_COLS):
                     st.success(f"💨 Đã xóa `{did}`!")
-                    # delete_row_by_id đã clear() cache
                     st.rerun()
                 else:
                     st.error("😵 Xóa không được! Refresh thử~")
