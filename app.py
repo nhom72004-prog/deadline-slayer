@@ -203,7 +203,7 @@ def discord_dm(sender, content): return f"📩 **{sender}**: {content}"
 def discord_group_chat(sender, group, content): return f"💬 **{sender}** [{group}]: {content}"
 
 # ═══════════════════════════════════════════════════════════
-#  3. GOOGLE SHEETS
+#  3. GOOGLE SHEETS - OPTIMIZED
 # ═══════════════════════════════════════════════════════════
 @st.cache_resource(ttl=600)
 def get_sheets_client():
@@ -212,6 +212,17 @@ def get_sheets_client():
         return gspread.authorize(creds)
     except Exception as e:
         st.error(f"❌ {e}")
+        return None
+
+@st.cache_resource(ttl=600)
+def get_spreadsheet():
+    """Cache toàn bộ spreadsheet object"""
+    client = get_sheets_client()
+    if not client:
+        return None
+    try:
+        return client.open(st.session_state["sheet_name"])
+    except:
         return None
 
 def migrate_sheet(ws, expected_cols):
@@ -243,11 +254,11 @@ def init_spreadsheet_structure(ss):
             migrate_sheet(existing[name], cols)
 
 def get_ws(name):
-    c = get_sheets_client()
-    if not c:
+    ss = get_spreadsheet()
+    if not ss:
         return None
     try:
-        return c.open(st.session_state["sheet_name"]).worksheet(name)
+        return ss.worksheet(name)
     except:
         return None
 
@@ -262,32 +273,56 @@ def append_row_data(name, row, schema):
         row = list(row) + [""] * max(0, expected_len - len(row))
         row = row[:expected_len]
         ws.append_row(row, value_input_option="USER_ENTERED")
-        time.sleep(0.5)
+        time.sleep(0.3)
         invalidate_cache()
         return True
     except Exception as e:
         st.error(f"❌ {e}")
         return False
 
-def update_cell_by_id(ws_name, id_col, item_id, upd_col, new_val, schema):
-    """Cập nhật + xoá cache"""
+def batch_update_cells(ws_name, updates_dict, schema):
+    """
+    Cập nhật nhiều ô trong một lần gọi API
+    updates_dict: {id_value: {col_name: new_value, ...}, ...}
+    """
     ws = get_ws(ws_name)
     if not ws:
-        return
+        return False
     try:
         actual_header = ws.row_values(1)
         actual_header = [COLUMN_ALIAS.get(h, h) for h in actual_header]
-        if id_col not in actual_header or upd_col not in actual_header:
-            return
-        id_col_idx  = actual_header.index(id_col) + 1
-        upd_col_idx = actual_header.index(upd_col) + 1
-        cell = ws.find(str(item_id))
-        if cell and cell.col == id_col_idx:
-            ws.update_cell(cell.row, upd_col_idx, new_val)
-            time.sleep(0.5)
+        
+        id_col = schema[0]  # Cột ID luôn ở vị trí đầu
+        if id_col not in actual_header:
+            return False
+        
+        id_col_idx = actual_header.index(id_col)
+        all_values = ws.get_all_values()
+        
+        updates = []
+        for row_idx, row in enumerate(all_values[1:], start=2):  # Bỏ header
+            if len(row) > id_col_idx and row[id_col_idx] in updates_dict:
+                for col_name, new_val in updates_dict[row[id_col_idx]].items():
+                    if col_name in actual_header:
+                        col_idx = actual_header.index(col_name)
+                        updates.append({
+                            "range": f"{chr(65 + col_idx)}{row_idx}",
+                            "values": [[new_val]]
+                        })
+        
+        if updates:
+            for update in updates:
+                ws.update(update["range"], update["values"])
+            time.sleep(0.3)
             invalidate_cache()
-    except:
-        pass
+        return True
+    except Exception as e:
+        st.error(f"❌ {e}")
+        return False
+
+def update_cell_by_id(ws_name, id_col, item_id, upd_col, new_val, schema):
+    """Cập nhật + xoá cache (tương thích với code cũ)"""
+    batch_update_cells(ws_name, {item_id: {upd_col: new_val}}, schema)
 
 def delete_row_by_id(ws_name, id_col, item_id, schema):
     """Xoá + xoá cache"""
@@ -295,12 +330,14 @@ def delete_row_by_id(ws_name, id_col, item_id, schema):
     if not ws:
         return False
     try:
-        cell = ws.find(str(item_id))
-        if cell and cell.col == schema.index(id_col) + 1:
-            ws.delete_rows(cell.row)
-            time.sleep(0.5)
-            invalidate_cache()
-            return True
+        all_values = ws.get_all_values()
+        id_col_idx = schema.index(id_col)
+        for idx, row in enumerate(all_values[1:], start=2):
+            if len(row) > id_col_idx and row[id_col_idx] == str(item_id):
+                ws.delete_rows(idx)
+                time.sleep(0.3)
+                invalidate_cache()
+                return True
         return False
     except:
         return False
@@ -510,7 +547,7 @@ def main_app(data):
         cur_wh = str(me.get("Discord_Webhook_DM", "")).strip()
         new_wh = st.text_input("Webhook:", value=cur_wh, key="sidebar_wh").strip()
         if st.button("💾 Lưu", use_container_width=True, key="sidebar_save_wh"):
-            update_cell_by_id(WS_USERS, "User_ID", my_id, "Discord_Webhook_DM", new_wh, USER_COLS)
+            batch_update_cells(WS_USERS, {my_id: {"Discord_Webhook_DM": new_wh}}, USER_COLS)
             st.toast(msg_webhook_saved())
         if is_leader:
             st.markdown("---")
@@ -528,6 +565,7 @@ def main_app(data):
                     st.toast("✅" if ok else "❌")
         st.markdown("---")
         if st.button("🔄 Làm mới", use_container_width=True, key="sidebar_refresh"):
+            get_spreadsheet.clear()
             invalidate_cache()
             st.rerun()
 
@@ -539,11 +577,11 @@ def main_app(data):
     with tab2: render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends)
     with tab3: render_chat(data["chat"], data["dm"], groups_df, users_df, my_id, my_friends)
     with tab4: render_friends_management(users_df, my_id, my_friends)
-    with tab5: render_leaderboard(tasks_df, users_df)
+    with tab5: render_leaderboard(tasks_df, users_df, my_id, my_friends)
     with tab6: render_account_tab(users_df, my_id)
 
 # ═══════════════════════════════════════════════════════════
-#  7-12. RENDER FUNCTIONS (tương tự file trước, rút gọn)
+#  7-12. RENDER FUNCTIONS
 # ═══════════════════════════════════════════════════════════
 def render_dashboard(tasks_df, groups_df, users_df, my_id):
     st.subheader("📊 Dashboard")
@@ -574,9 +612,10 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id):
                 with c1:
                     np_ = st.slider("Tiến độ:", 0, 100, int(row["Tiến_Độ_%"]), key=f"sld_{row['ID']}")
                     if st.button("💾", key=f"btn_{row['ID']}"):
-                        update_cell_by_id(WS_TASKS, "ID", row["ID"], "Tiến_Độ_%", np_, TASK_COLS)
+                        updates = {"Tiến_Độ_%": np_}
                         if np_ == 100:
-                            update_cell_by_id(WS_TASKS, "ID", row["ID"], "Trạng_Thái", "Đã xong", TASK_COLS)
+                            updates["Trạng_Thái"] = "Đã xong"
+                        batch_update_cells(WS_TASKS, {row["ID"]: updates}, TASK_COLS)
                         st.success(msg_progress_saved(np_))
                         st.rerun()
                 with c2:
@@ -619,9 +658,11 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
                     c1, c2 = st.columns(2)
                     with c1:
                         if st.button("💾", key=f"s_{gd['Group_ID']}"):
-                            update_cell_by_id(WS_GROUPS, "Group_ID", gd["Group_ID"], "Tên_Nhóm", new_name, GROUP_COLS)
-                            update_cell_by_id(WS_GROUPS, "Group_ID", gd["Group_ID"], "Thành_Viên_IDs", ",".join([my_id]+new_members), GROUP_COLS)
-                            update_cell_by_id(WS_GROUPS, "Group_ID", gd["Group_ID"], "Discord_Webhook", new_wh, GROUP_COLS)
+                            batch_update_cells(WS_GROUPS, {gd["Group_ID"]: {
+                                "Tên_Nhóm": new_name,
+                                "Thành_Viên_IDs": ",".join([my_id]+new_members),
+                                "Discord_Webhook": new_wh
+                            }}, GROUP_COLS)
                             st.success("✅")
                             st.rerun()
                     with c2:
@@ -656,6 +697,10 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends):
             g_opts = {g["Group_ID"]: g["Tên_Nhóm"] for _, g in in_grps.iterrows()}
             sel_gid = st.selectbox("Nhóm:", list(g_opts.keys()), format_func=lambda x: g_opts[x], key="chat_gid")
             g_msgs = chat_df[chat_df["Group_Nhận_ID"]==sel_gid].sort_values("Thời_Gian") if not chat_df.empty else pd.DataFrame(columns=CHAT_COLS)
+            
+            grp_info = groups_df[groups_df["Group_ID"] == sel_gid]
+            grp_webhook = str(grp_info.iloc[0].get("Discord_Webhook", "")).strip() if not grp_info.empty else ""
+            
             with st.container(height=300):
                 if g_msgs.empty:
                     st.caption("Chưa có")
@@ -663,16 +708,31 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends):
                     st.markdown(render_messages_html(g_msgs.iterrows(), my_id, users_df, "group"), unsafe_allow_html=True)
             with st.form("grp"):
                 txt = st.text_input("Tin:", key="grp_txt")
-                if st.form_submit_button("Gửi"):
-                    if txt.strip():
-                        append_row_data(WS_CHAT, [NOW().strftime("%Y-%m-%d %H:%M:%S"), my_id, sel_gid, txt.strip(), "text", "", ""], CHAT_COLS)
-                        st.rerun()
+                col1, col2 = st.columns([0.8, 0.2])
+                with col1:
+                    if st.form_submit_button("Gửi", use_container_width=True):
+                        if txt.strip():
+                            append_row_data(WS_CHAT, [NOW().strftime("%Y-%m-%d %H:%M:%S"), my_id, sel_gid, txt.strip(), "text", "", ""], CHAT_COLS)
+                            st.rerun()
+                with col2:
+                    if st.form_submit_button("🤖", use_container_width=True):
+                        if txt.strip() and grp_webhook:
+                            sender_name = get_user_name(my_id, users_df)
+                            grp_name = grp_info.iloc[0]["Tên_Nhóm"] if not grp_info.empty else "Unknown"
+                            msg = discord_group_chat(sender_name, grp_name, txt.strip())
+                            push_to_discord(msg, grp_webhook)
+                            st.toast("✅ Đã gửi Discord!")
+                        elif not grp_webhook:
+                            st.warning("⚠️ Chưa cấu hình Webhook!")
     with t2:
         valid_friends = [f for f in my_friends if f]
         if valid_friends:
             f_opts = {f: get_user_name(f, users_df) for f in valid_friends}
             sel_fid = st.selectbox("Bạn:", list(f_opts.keys()), format_func=lambda x: f_opts[x], key="dm_fid")
             d_msgs = dm_df[((dm_df["Người_Gửi_ID"]==my_id) & (dm_df["Người_Nhận_ID"]==sel_fid)) | ((dm_df["Người_Gửi_ID"]==sel_fid) & (dm_df["Người_Nhận_ID"]==my_id))].sort_values("Thời_Gian") if not dm_df.empty else pd.DataFrame(columns=DM_COLS)
+            
+            friend_webhook = get_user_dm_webhook(sel_fid, users_df)
+            
             with st.container(height=300):
                 if d_msgs.empty:
                     st.caption("Chưa có")
@@ -680,10 +740,21 @@ def render_chat(chat_df, dm_df, groups_df, users_df, my_id, my_friends):
                     st.markdown(render_messages_html(d_msgs.iterrows(), my_id, users_df, "dm"), unsafe_allow_html=True)
             with st.form("dm"):
                 txt = st.text_input("Tin:", key="dm_txt")
-                if st.form_submit_button("Gửi"):
-                    if txt.strip():
-                        append_row_data(WS_DM, [NOW().strftime("%Y-%m-%d %H:%M:%S"), my_id, sel_fid, txt.strip(), "text", "", ""], DM_COLS)
-                        st.rerun()
+                col1, col2 = st.columns([0.8, 0.2])
+                with col1:
+                    if st.form_submit_button("Gửi", use_container_width=True):
+                        if txt.strip():
+                            append_row_data(WS_DM, [NOW().strftime("%Y-%m-%d %H:%M:%S"), my_id, sel_fid, txt.strip(), "text", "", ""], DM_COLS)
+                            st.rerun()
+                with col2:
+                    if st.form_submit_button("🤖", use_container_width=True):
+                        if txt.strip() and friend_webhook:
+                            sender_name = get_user_name(my_id, users_df)
+                            msg = discord_dm(sender_name, txt.strip())
+                            push_to_discord(msg, friend_webhook)
+                            st.toast("✅ Đã gửi Discord!")
+                        elif not friend_webhook:
+                            st.warning("⚠️ Bạn chưa cấu hình Webhook!")
 
 def render_friends_management(users_df, my_id, my_friends):
     st.subheader("👫 Bạn Bè")
@@ -694,26 +765,38 @@ def render_friends_management(users_df, my_id, my_friends):
         if st.button("Thêm", type="primary", use_container_width=True, key="add_btn"):
             if f_id and f_id != my_id:
                 if not users_df[users_df["User_ID"]==f_id].empty:
-                    update_cell_by_id(WS_USERS, "User_ID", my_id, "Bạn_Bè", ",".join(my_friends+[f_id]), USER_COLS)
+                    batch_update_cells(WS_USERS, {my_id: {"Bạn_Bè": ",".join(my_friends+[f_id])}}, USER_COLS)
                     st.rerun()
     with c2:
         st.markdown("### 👥")
         for fid in my_friends:
             if fid and st.button(f"❌ {get_user_name(fid, users_df)}", key=f"del_{fid}", use_container_width=True):
-                update_cell_by_id(WS_USERS, "User_ID", my_id, "Bạn_Bè", ",".join([f for f in my_friends if f!=fid]), USER_COLS)
+                batch_update_cells(WS_USERS, {my_id: {"Bạn_Bè": ",".join([f for f in my_friends if f!=fid])}}, USER_COLS)
                 st.rerun()
 
-def render_leaderboard(tasks_df, users_df):
+def render_leaderboard(tasks_df, users_df, my_id, my_friends):
     st.subheader("🏆 Xếp Hạng")
     if tasks_df.empty:
         st.info("Chưa có")
         return
-    t = tasks_df.copy()
+    
+    valid_users = [my_id] + [f for f in my_friends if f]
+    
+    t = tasks_df[tasks_df["Người_Phụ_Trách_ID"].isin(valid_users)].copy()
+    
+    if t.empty:
+        st.info("Chưa có dữ liệu")
+        return
+    
     t["Tiến_Độ_%"] = t["Tiến_Độ_%"].apply(clean_progress)
     done = t[(t["Trạng_Thái"]=="Đã xong") | (t["Tiến_Độ_%"]>=100)]
     counts = done["Người_Phụ_Trách_ID"].value_counts().to_dict()
-    records = [{"Chiến Binh": u["Tên"], "Hoàn": counts.get(u["User_ID"], 0)} for _, u in users_df.iterrows()]
-    df = pd.DataFrame(records).sort_values("Hoàn", ascending=False).reset_index(drop=True)
+    
+    records = [{"👤 Chiến Binh": u["Tên"], "⚔️ Hoàn": counts.get(u["User_ID"], 0)} 
+               for _, u in users_df[users_df["User_ID"].isin(valid_users)].iterrows()]
+    
+    df = pd.DataFrame(records).sort_values("⚔️ Hoàn", ascending=False).reset_index(drop=True)
+    df.index = df.index + 1
     st.dataframe(df, use_container_width=True)
 
 def render_account_tab(users_df, my_id):
@@ -726,8 +809,10 @@ def render_account_tab(users_df, my_id):
         new_pass = st.text_input("Pass:", value=str(me["Password"]), type="password", key="acc_pass")
         if st.button("💾", use_container_width=True, key="save_acc"):
             if new_name.strip() and new_pass.strip():
-                update_cell_by_id(WS_USERS, "User_ID", my_id, "Tên", new_name.strip(), USER_COLS)
-                update_cell_by_id(WS_USERS, "User_ID", my_id, "Password", new_pass.strip(), USER_COLS)
+                batch_update_cells(WS_USERS, {my_id: {
+                    "Tên": new_name.strip(),
+                    "Password": new_pass.strip()
+                }}, USER_COLS)
                 st.success("✅")
                 st.rerun()
 
