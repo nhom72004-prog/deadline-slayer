@@ -611,7 +611,7 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id):
                 c1, c2 = st.columns(2)
                 with c1:
                     np_ = st.slider("Tiến độ:", 0, 100, int(row["Tiến_Độ_%"]), key=f"sld_{row['ID']}")
-                    if st.button("💾", key=f"btn_{row['ID']}"):
+                    if st.button("💾 Lưu tiến độ", key=f"btn_{row['ID']}"):
                         updates = {"Tiến_Độ_%": np_}
                         if np_ == 100:
                             updates["Trạng_Thái"] = "Đã xong"
@@ -619,14 +619,34 @@ def render_dashboard(tasks_df, groups_df, users_df, my_id):
                         st.success(msg_progress_saved(np_))
                         st.rerun()
                 with c2:
-                    pf = st.file_uploader("📤", key=f"file_{row['ID']}")
-                    if st.button("🚀", key=f"pb_{row['ID']}"):
+                    pf = st.file_uploader("📤 Nộp file", key=f"file_{row['ID']}")
+                    if st.button("🚀 Nộp", key=f"pb_{row['ID']}"):
                         if pf:
                             an = get_user_name(row["Người_Phụ_Trách_ID"], users_df)
                             ag = groups_df[groups_df["Thành_Viên_IDs"].str.contains(my_id, na=False)]
                             for _, g in ag.iterrows():
                                 push_to_discord(discord_proof_sent(an, row["Tên_Công_Việc"]), str(g.get("Discord_Webhook", "")).strip(), pf.getvalue(), pf.name)
                             st.success(msg_proof_sent())
+
+                # ─── Sửa Deadline ───
+                st.markdown("---")
+                st.caption("⏰ Sửa Deadline")
+                new_date = st.date_input("Deadline mới:", key=f"dl_{row['ID']}")
+                if st.button("💾 Lưu Deadline", key=f"btn_dl_{row['ID']}"):
+                    new_dl = datetime.combine(new_date, datetime.strptime("23:59", "%H:%M").time()).strftime("%Y-%m-%d %H:%M:%S")
+                    batch_update_cells(WS_TASKS, {row["ID"]: {"Deadline": new_dl}}, TASK_COLS)
+                    st.success("✅ Deadline đã cập nhật!")
+                    st.rerun()
+
+                # ─── Xóa Task ───
+                st.markdown("---")
+                st.caption("🗑️ Xóa Task")
+                confirm_delete = st.checkbox("Xác nhận xóa vĩnh viễn", key=f"del_check_{row['ID']}")
+                if confirm_delete:
+                    if st.button("❌ Xóa Task", key=f"del_btn_{row['ID']}", type="secondary"):
+                        if delete_row_by_id(WS_TASKS, "ID", row["ID"], TASK_COLS):
+                            st.success("🗑️ Đã xóa task!")
+                            st.rerun()
 
 def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
     st.subheader("👥 Nhóm & Giao Việc")
@@ -666,9 +686,16 @@ def render_network_and_tasks(users_df, groups_df, tasks_df, my_id, my_friends):
                             st.success("✅")
                             st.rerun()
                     with c2:
-                        if st.button("🗑️", key=f"d_{gd['Group_ID']}"):
-                            if delete_row_by_id(WS_GROUPS, "Group_ID", gd["Group_ID"], GROUP_COLS):
-                                st.rerun()
+                        # Checkbox xác nhận trước khi hiện nút xóa
+                        del_key = f"del_confirm_{gd['Group_ID']}"
+                        if del_key not in st.session_state:
+                            st.session_state[del_key] = False
+                        st.checkbox("Xác nhận xóa nhóm", key=del_key)
+                        if st.session_state[del_key]:
+                            if st.button("🗑️ Xóa nhóm", key=f"d_{gd['Group_ID']}"):
+                                if delete_row_by_id(WS_GROUPS, "Group_ID", gd["Group_ID"], GROUP_COLS):
+                                    st.success("Đã xóa nhóm!")
+                                    st.rerun()
     with sub3:
         assignable = {my_id: "Tự"}
         for f in my_friends:
